@@ -1,5 +1,6 @@
-#include <iostream>
+import std;
+import util;
 
 int main() {
-    std::cout << "Hello world" << std::endl;
+    std::cout << *util::get_env("XDG_RUNTIME_DIR") << std::endl;
 }

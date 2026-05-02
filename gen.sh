@@ -4,4 +4,4 @@ set -e
 cd "$(dirname "$0")"
 
 rm -rf build
-cmake -B build -G Ninja
+cmake -B build -G Ninja -Wno-dev
