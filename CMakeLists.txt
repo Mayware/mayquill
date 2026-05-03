@@ -9,6 +9,11 @@ set(CMAKE_CXX_MODULE_STD ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+#> Debug by default
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+
 #>                  Use clang's libc, clang complains its own libc exports td
 set(CMAKE_CXX_FLAGS "-stdlib=libc++ -Wno-reserved-module-identifier")
 
@@ -21,4 +26,8 @@ target_sources(mayquill
         main.cpp
     PRIVATE FILE_SET CXX_MODULES FILES
         util.cppm
+        server.cppm
 )
+
+find_package(pugixml REQUIRED)
+target_link_libraries(mayquill PRIVATE pugixml::pugixml)

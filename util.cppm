@@ -3,11 +3,11 @@ export module util;
 import std;
 
 export namespace util {
-    std::optional<std::string> get_env(const std::string& name) {
-        if (const char* value = std::getenv(name.c_str())) {
-            return value;
-        }
+std::optional<std::string> get_env(const std::string &name) {
+  if (const char *value = std::getenv(name.c_str())) {
+    return value;
+  }
 
-        return std::nullopt;
-    }
+  return std::nullopt;
 }
+} // namespace util
