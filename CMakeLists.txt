@@ -26,7 +26,7 @@ target_sources(mayquill
         main.cpp
     PRIVATE FILE_SET CXX_MODULES FILES
         util.cppm
-        server.cppm
+        wire.cppm
 )
 
 find_package(pugixml REQUIRED)
