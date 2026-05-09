@@ -3,3 +3,6 @@ UseTab: Always
 TabWidth: 4
 ColumnLimit: 0
 AlignAfterOpenBracket: DontAlign
+ReferenceAlignment: Left
+PointerAlignment: Left
+SpaceAfterTemplateKeyword: false
