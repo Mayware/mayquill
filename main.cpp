@@ -1,6 +1,4 @@
-#include <optional>
 #include <pugixml.hpp>
-#include <string>
 import std;
 
 // Useful docs: https://wayland.freedesktop.org/docs/book/Message_XML.html
@@ -40,30 +38,30 @@ struct Argument {
 	Description description;
 	std::optional<std::string> interface_name;
 	std::optional<std::string> enum_name;
-	std::optional<bool> allow_null = false;
+	bool allow_null;
 };
 
 struct Declaration {
 	std::string name;
 	Description description;
 	std::vector<Argument> arguments;
-	bool is_destructor = false;
-	uint since = 1;
+	uint since;
+	bool is_destructor;
 };
 
 struct Entry {
 	std::string name;
-	std::string value;
 	Description description;
-	uint since = 1;
+	int value;
+	uint since;
 };
 
 struct Enum {
 	std::string name;
 	Description description;
 	std::vector<Entry> entries;
-	uint since = 1;
-	bool bitfield = false;
+	uint since;
+	bool bitfield;
 };
 
 struct Interface {
@@ -91,7 +89,7 @@ void handle_request(pugi::xml_node& request, std::string& out) {
 	std::vector<Arg> args;
 
 	for (pugi::xml_node arg : request.children("arg")) {
-		args.push_back(Arg{
+		args.push_back(Arg {
 			.name = arg.attribute("name").as_string(),
 			.type = types[arg.attribute("type").as_string()],
 			.summary = arg.attribute("summary").as_string(),
@@ -162,39 +160,67 @@ std::string trim(std::string target) {
 
 std::optional<std::string> optional_string(const pugi::xml_node& node, const char* name) {
 	auto attribute = node.attribute(name);
-	return attribute ? std::optional<std::string>{attribute.as_string()} : std::nullopt;
-}
-std::optional<uint32_t> optional_uint(const pugi::xml_node& node, const char* name) {
-	auto attribute = node.attribute(name);
-	return attribute ? std::optional<uint32_t>{attribute.as_uint()} : std::nullopt;
-}
-std::optional<bool> optional_bool(const pugi::xml_node& node, const char* name) {
-	auto attribute = node.attribute(name);
-	return attribute ? std::optional<bool>{attribute.as_bool()} : std::nullopt;
+	return attribute ? std::optional<std::string> {attribute.as_string()} : std::nullopt;
 }
 
 Description get_description(const pugi::xml_node& node) {
-	return Description{
-		.summary = node.attribute("summary").as_string(),
-		.full = node.text().as_string(),
+	auto full = node.text();
+	Description description = {
+		.summary = optional_string(node, "summary"),
+		.full = full ? std::optional(std::string(full.as_string())) : std::nullopt,
 	};
+
+	return description;
+}
+
+uint get_since(const pugi::xml_node& node) {
+	auto since = node.attribute("since");
+	return since ? since.as_uint() : 1;
+}
+
+bool get_allow_null(const pugi::xml_node& node) {
+	auto allow_null = node.attribute("allow-null");
+	return allow_null ? allow_null.as_bool() : false;
+}
+
+bool get_destructor(const pugi::xml_node& node) {
+	auto type = node.attribute("type");
+
+	// API is a bit retarded, because from what i can see, the type can only ever be
+	// destructor for a declaration, but i've added the check anyways
+	// https://wayland.freedesktop.org/docs/book/Message_XML.html#typedestructor
+	return type ? (std::string(type.as_string()) == "destructor" ? true : false) : false;
+}
+
+bool get_bitfield(const pugi::xml_node& node) {
+	auto bitfield = node.attribute("bitfield");
+	return bitfield ? bitfield.as_bool() : false;
+}
+
+int get_entry_value(const pugi::xml_node& node) {
+	// From the docs: https://pugixml.org/docs/manual.html#access.attrdata
+	// the default as_int doesn't mention octal support, which is technically
+	// valid although I haven't seen it be used in wayland.xml itself.
+	// Base 0 means let stoi do whatever the fuck it wants (auto-detect)
+	return std::stoi(node.attribute("value").as_string(), nullptr, 0);
 }
 
 Declaration get_declaration(const pugi::xml_node& node) {
-	Declaration declaration = Declaration{
+	Declaration declaration = Declaration {
 		.name = node.attribute("name").as_string(),
 		.description = get_description(node.child("description")),
-		.since = node.attribute("since").as_uint(),
+		.since = get_since(node),
+		.is_destructor = get_destructor(node),
 	};
 
 	for (pugi::xml_node node : node.children("arg")) {
-		declaration.arguments.push_back(Argument{
+		declaration.arguments.push_back(Argument {
 			.name = node.attribute("name").as_string(),
-			.type = types[node.attribute("type").as_string()],
+			.type = types[node.attribute("type").as_string()], // This is the only place we do conversion on parse
+			.description = get_description(node),
 			.interface_name = optional_string(node, "interface"),
 			.enum_name = optional_string(node, "enum"),
-			.allow_null = optional_bool(node, "allow-null"),
-			.summary = node.attribute("summary").as_string(),
+			.allow_null = get_allow_null(node),
 		});
 	}
 
@@ -202,15 +228,20 @@ Declaration get_declaration(const pugi::xml_node& node) {
 }
 
 Enum get_enum(const pugi::xml_node& node) {
-	Enum enum_ret = Enum{
+	Enum enum_ret = Enum {
 		.name = node.attribute("name").as_string(),
 		.description = get_description(node.child("description")),
+		.since = get_since(node),
+		.bitfield = get_bitfield(node),
 	};
 
-	for (pugi::xml_node node : node.children("entries")) {
-		enum_ret.entries.push_back(Entry{
+	for (pugi::xml_node node : node.children("entry")) {
+		enum_ret.entries.push_back(Entry {
 			.name = node.attribute("name").as_string(),
-			.since = optional_uint(node, "since")});
+			.description = get_description(node),
+			.value = get_entry_value(node),
+			.since = get_since(node),
+		});
 	}
 
 	return enum_ret;
@@ -231,18 +262,16 @@ int main() {
 		std::vector<Protocol> protocols;
 
 		for (pugi::xml_node node : doc.children("protocol")) {
-			Protocol protocol = Protocol{
+			Protocol protocol = Protocol {
 				.name = node.attribute("name").as_string(),
-				.copyright = node.child("copyright").text().as_string(),
+				.copyright = optional_string(node, "copyright"),
+				.description = get_description(node),
 			};
 
 			for (pugi::xml_node node : node.children()) {
-				Interface interface = Interface{
+				Interface interface = Interface {
 					.name = node.attribute("name").as_string(),
-					.description = Description{
-						.summary = node.child("description").attribute("summary").as_string(),
-						.full = node.child("description").text().as_string(),
-					},
+					.description = get_description(node),
 					.version = node.attribute("version").as_uint(),
 				};
 
@@ -252,9 +281,11 @@ int main() {
 				for (pugi::xml_node node : node.children("event")) {
 					interface.events.push_back(get_declaration(node));
 				}
-				for (pugi::xml_node node : node.children("event")) {
+				for (pugi::xml_node node : node.children("enum")) {
 					interface.enums.push_back(get_enum(node));
 				}
+
+				protocol.interfaces.push_back(interface);
 			}
 		}
 

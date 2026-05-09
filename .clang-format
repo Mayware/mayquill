@@ -6,3 +6,4 @@ AlignAfterOpenBracket: DontAlign
 ReferenceAlignment: Left
 PointerAlignment: Left
 SpaceAfterTemplateKeyword: false
+SpaceBeforeCpp11BracedList: true
