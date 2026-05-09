@@ -1,294 +1,46 @@
-#include <pugixml.hpp>
 import std;
+import parser;
 
-// Useful docs: https://wayland.freedesktop.org/docs/book/Message_XML.html
+// // Prepends a prefix (shocked emoji) to the start of each line
+// std::string prepend(std::string target, const std::string& prefix) {
+// 	target.insert(0, prefix);
 
-/*
- *  Types:
- *  int / uint : 32 bits
- *  fixed point: 24 bits whole, 8 bits decimal
- *  object     : 32 bits
- *  new_id     : 32 bits
- *  string     : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits), \0 terminator
- *  array      : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits
- *  fd         : 0 bits, stored in ancillary data of the message
- *  enum       : 32 bits integer
- */
-std::unordered_map<std::string, std::string> types = {
-	{"int", "int32_t"},
-	{"uint", "uint32_t"},
-	{"fixed", "int32_t"},
-	{"object", "uint32_t"},
-	{"new_id", "uint32_t"},
-	{"string", "std::string"},
-	{"array", "void*"},
-	{"fd", "int"},
-	{"enum", "uint32_t"},
-};
+// 	size_t pos = target.find('\n');
 
-// We do not parse frozen, or deprecated-since
-struct Description {
-	std::optional<std::string> summary;
-	std::optional<std::string> full;
-};
+// 	while (pos != std::string::npos) {
+// 		// Don't insert it after the last newline
+// 		if (pos + 1 < target.size()) {
+// 			target.insert(pos + 1, prefix);
+// 		}
 
-struct Argument {
-	std::string name;
-	std::string type;
-	Description description;
-	std::optional<std::string> interface_name;
-	std::optional<std::string> enum_name;
-	bool allow_null;
-};
+// 		pos = target.find('\n', pos + prefix.size() + 1);
+// 	}
 
-struct Declaration {
-	std::string name;
-	Description description;
-	std::vector<Argument> arguments;
-	uint since;
-	bool is_destructor;
-};
+// 	return target;
+// }
 
-struct Entry {
-	std::string name;
-	Description description;
-	int value;
-	uint since;
-};
+// // Trims all leading spaces, tabs from the start of each line.
+// std::string trim(std::string target) {
+// 	size_t start = 0;
 
-struct Enum {
-	std::string name;
-	Description description;
-	std::vector<Entry> entries;
-	uint since;
-	bool bitfield;
-};
+// 	while (start < target.size()) {
+// 		auto end = start;
 
-struct Interface {
-	std::string name;
-	Description description;
-	uint version;
-	std::vector<Declaration> requests;
-	std::vector<Declaration> events;
-	std::vector<Enum> enums;
-};
+// 		while (end < target.size() && (target[end] == ' ' || target[end] == '\t')) {
+// 			++end;
+// 		}
+// 		target.erase(start, end - start);
 
-struct Protocol {
-	std::string name;
-	std::optional<std::string> copyright;
-	Description description;
-	std::vector<Interface> interfaces;
-};
-
-void handle_request(pugi::xml_node& request, std::string& out) {
-	using Arg = struct {
-		std::string name;
-		std::string type;
-		std::string summary;
-	};
-	std::vector<Arg> args;
-
-	for (pugi::xml_node arg : request.children("arg")) {
-		args.push_back(Arg {
-			.name = arg.attribute("name").as_string(),
-			.type = types[arg.attribute("type").as_string()],
-			.summary = arg.attribute("summary").as_string(),
-		});
-	}
-
-	std::format_to(
-		std::back_inserter(out),
-		"\n"
-		"    /** {}\n"
-		"     * {}\n",
-		request.attribute("summary").as_string(),
-		request.attribute("description").as_string());
-
-	for (auto& arg : args) {
-		std::format_to(
-			std::back_inserter(out),
-			"\n"
-			"     * @var {} {}\n"
-			"     * {}\n",
-			arg.name,
-			arg.type,
-			arg.summary);
-	}
-
-	out += "     */\n";
-}
-
-// Prepends a prefix (shocked emoji) to the start of each line
-std::string prepend(std::string target, const std::string& prefix) {
-	target.insert(0, prefix);
-
-	size_t pos = target.find('\n');
-
-	while (pos != std::string::npos) {
-		// Don't insert it after the last newline
-		if (pos + 1 < target.size()) {
-			target.insert(pos + 1, prefix);
-		}
-
-		pos = target.find('\n', pos + prefix.size() + 1);
-	}
-
-	return target;
-}
-
-// Trims all leading spaces, tabs from the start of each line.
-std::string trim(std::string target) {
-	size_t start = 0;
-
-	while (start < target.size()) {
-		auto end = start;
-
-		while (end < target.size() && (target[end] == ' ' || target[end] == '\t')) {
-			++end;
-		}
-		target.erase(start, end - start);
-
-		size_t newline_pos = target.find('\n', start);
-		// We've done every line
-		if (newline_pos == std::string::npos) {
-			break;
-		}
-		start = newline_pos + 1;
-	}
-	return target;
-}
-
-std::optional<std::string> optional_string(const pugi::xml_node& node, const char* name) {
-	auto attribute = node.attribute(name);
-	return attribute ? std::optional<std::string> {attribute.as_string()} : std::nullopt;
-}
-
-Description get_description(const pugi::xml_node& node) {
-	auto full = node.text();
-	Description description = {
-		.summary = optional_string(node, "summary"),
-		.full = full ? std::optional(std::string(full.as_string())) : std::nullopt,
-	};
-
-	return description;
-}
-
-uint get_since(const pugi::xml_node& node) {
-	auto since = node.attribute("since");
-	return since ? since.as_uint() : 1;
-}
-
-bool get_allow_null(const pugi::xml_node& node) {
-	auto allow_null = node.attribute("allow-null");
-	return allow_null ? allow_null.as_bool() : false;
-}
-
-bool get_destructor(const pugi::xml_node& node) {
-	auto type = node.attribute("type");
-
-	// API is a bit retarded, because from what i can see, the type can only ever be
-	// destructor for a declaration, but i've added the check anyways
-	// https://wayland.freedesktop.org/docs/book/Message_XML.html#typedestructor
-	return type ? (std::string(type.as_string()) == "destructor" ? true : false) : false;
-}
-
-bool get_bitfield(const pugi::xml_node& node) {
-	auto bitfield = node.attribute("bitfield");
-	return bitfield ? bitfield.as_bool() : false;
-}
-
-int get_entry_value(const pugi::xml_node& node) {
-	// From the docs: https://pugixml.org/docs/manual.html#access.attrdata
-	// the default as_int doesn't mention octal support, which is technically
-	// valid although I haven't seen it be used in wayland.xml itself.
-	// Base 0 means let stoi do whatever the fuck it wants (auto-detect)
-	return std::stoi(node.attribute("value").as_string(), nullptr, 0);
-}
-
-Declaration get_declaration(const pugi::xml_node& node) {
-	Declaration declaration = Declaration {
-		.name = node.attribute("name").as_string(),
-		.description = get_description(node.child("description")),
-		.since = get_since(node),
-		.is_destructor = get_destructor(node),
-	};
-
-	for (pugi::xml_node node : node.children("arg")) {
-		declaration.arguments.push_back(Argument {
-			.name = node.attribute("name").as_string(),
-			.type = types[node.attribute("type").as_string()], // This is the only place we do conversion on parse
-			.description = get_description(node),
-			.interface_name = optional_string(node, "interface"),
-			.enum_name = optional_string(node, "enum"),
-			.allow_null = get_allow_null(node),
-		});
-	}
-
-	return declaration;
-}
-
-Enum get_enum(const pugi::xml_node& node) {
-	Enum enum_ret = Enum {
-		.name = node.attribute("name").as_string(),
-		.description = get_description(node.child("description")),
-		.since = get_since(node),
-		.bitfield = get_bitfield(node),
-	};
-
-	for (pugi::xml_node node : node.children("entry")) {
-		enum_ret.entries.push_back(Entry {
-			.name = node.attribute("name").as_string(),
-			.description = get_description(node),
-			.value = get_entry_value(node),
-			.since = get_since(node),
-		});
-	}
-
-	return enum_ret;
-}
+// 		size_t newline_pos = target.find('\n', start);
+// 		// We've done every line
+// 		if (newline_pos == std::string::npos) {
+// 			break;
+// 		}
+// 		start = newline_pos + 1;
+// 	}
+// 	return target;
+// }
 
 int main() {
-	for (const auto& entry : std::filesystem::directory_iterator("./in")) {
-		pugi::xml_document doc;
-		pugi::xml_parse_result result = doc.load_file(entry.path().c_str());
-		if (!result) {
-			std::println("Failed to load document: {}, {}", entry.path().filename().c_str(), result.description());
-			return -1;
-		}
-
-		std::string out = "";
-		out += "/* Generated by MayQuill, godspeed */";
-
-		std::vector<Protocol> protocols;
-
-		for (pugi::xml_node node : doc.children("protocol")) {
-			Protocol protocol = Protocol {
-				.name = node.attribute("name").as_string(),
-				.copyright = optional_string(node, "copyright"),
-				.description = get_description(node),
-			};
-
-			for (pugi::xml_node node : node.children()) {
-				Interface interface = Interface {
-					.name = node.attribute("name").as_string(),
-					.description = get_description(node),
-					.version = node.attribute("version").as_uint(),
-				};
-
-				for (pugi::xml_node node : node.children("request")) {
-					interface.requests.push_back(get_declaration(node));
-				}
-				for (pugi::xml_node node : node.children("event")) {
-					interface.events.push_back(get_declaration(node));
-				}
-				for (pugi::xml_node node : node.children("enum")) {
-					interface.enums.push_back(get_enum(node));
-				}
-
-				protocol.interfaces.push_back(interface);
-			}
-		}
-
-		std::println("{}", out);
-	}
+    auto files = parser::get_parsed();
 }
