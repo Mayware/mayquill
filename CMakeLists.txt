@@ -21,6 +21,7 @@ project(mayquill)
 
 add_executable(mayquill)
 
+file(GLOB_RECURSE GEN_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/out/*.cppm")
 target_sources(mayquill
     PRIVATE
         main.cpp
@@ -28,6 +29,7 @@ target_sources(mayquill
         util.cppm
         wire.cppm
         parser.cppm
+        ${GEN_FILES}
 )
 
 find_package(pugixml REQUIRED)

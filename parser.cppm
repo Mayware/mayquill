@@ -19,15 +19,15 @@ export namespace parser {
  *  enum       : 32 bits integer
  */
 std::unordered_map<std::string, std::string> types = {
-	{"int", "int32_t"},
-	{"uint", "uint32_t"},
-	{"fixed", "int32_t"},
-	{"object", "uint32_t"},
-	{"new_id", "uint32_t"},
+	{"int", "std::int32_t"},
+	{"uint", "std::uint32_t"},
+	{"fixed", "std::int32_t"},
+	{"object", "std::uint32_t"},
+	{"new_id", "std::uint32_t"},
 	{"string", "std::string"},
 	{"array", "void*"},
 	{"fd", "int"},
-	{"enum", "uint32_t"},
+	{"enum", "std::uint32_t"},
 };
 
 // We do not parse frozen, or deprecated-since
