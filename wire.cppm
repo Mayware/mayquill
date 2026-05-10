@@ -6,9 +6,9 @@ module;
 #include <sys/un.h>
 #include <unistd.h>
 
-export module server;
+export module Server;
 import std;
-import util;
+import Util;
 
 struct Client {
 	uint64_t id;

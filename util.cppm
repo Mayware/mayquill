@@ -1,6 +1,6 @@
 module;
 #include <cstdint>
-export module util;
+export module Util;
 import std;
 
 export namespace util {

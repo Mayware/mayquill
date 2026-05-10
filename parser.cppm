@@ -1,6 +1,6 @@
 module;
 #include <pugixml.hpp>
-export module parser;
+export module Parser;
 import std;
 
 export namespace parser {
