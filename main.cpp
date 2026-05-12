@@ -66,17 +66,32 @@ void write_file(std::string name, std::string content) {
 int main() {
 	auto protocols = parser::get_protocols();
 
-	// // Write the actual server
+	// Write the MayQuill primary interface
 	{
 		std::string content = "";
 		add_header(content);
 		content += "export module MayQuill:Generated;\n"
 				   "import std;\n";
+
+		// Write the imports
 		for (auto& protocol : protocols) {
 			for (auto& interface : protocol.interfaces) {
 				content += std::format("import {}.{};\n", protocol.name, interface.name);
 			}
 		}
+
+		// Write the using Interface
+		content += "\nusing Interface = std::variant<";
+		for (auto& protocol : protocols) {
+			for (std::size_t i = 0; i < protocol.interfaces.size(); ++i) {
+				content += protocol.interfaces[i].name;
+				if (i == protocol.interfaces.size() - 1) {
+					continue;
+				}
+				content += ", ";
+			}
+		}
+		content += ">;\n";
 		write_file("mayquill", std::move(content));
 	}
 
@@ -92,7 +107,11 @@ int main() {
 				protocol.name, interface.name);
 
 			// content += std::format("export namespace {} {{\n", protocol.name);
-			content += std::format("struct {} {{\n", interface.name);
+			content += std::format("export struct {} {{\n"
+								   "    // These are the only runtime mutable states\n"
+								   "    std::uint32_t object_id;\n"
+								   "    std::uint32_t client_id;\n\n",
+				interface.name);
 
 			for (auto& request : interface.requests) {
 				content += std::format("    struct {} {{", request.name);
@@ -115,8 +134,10 @@ int main() {
 				content += ", ";
 			}
 			content += ">;\n"
+					   "    void handle(Request request); // Will be overidden by downstream user\n"
 					   "};\n";
 			// "};";
+
 			write_file(interface.name, std::move(content));
 		}
 	}

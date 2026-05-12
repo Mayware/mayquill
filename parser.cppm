@@ -141,8 +141,12 @@ bool get_bitfield(const pugi::xml_node& node) {
 	return bitfield ? bitfield.as_bool() : false;
 }
 
-std::string get_name(const pugi::xml_node& node) {
+std::string get_pascal_name(const pugi::xml_node& node) {
     return snake_to_pascal(std::move(node.attribute("name").as_string()));
+}
+
+std::string get_name(const pugi::xml_node& node) {
+    return node.attribute("name").as_string();
 }
 
 int get_entry_value(const pugi::xml_node& node) {
@@ -155,7 +159,7 @@ int get_entry_value(const pugi::xml_node& node) {
 
 Declaration get_declaration(const pugi::xml_node& node) {
 	Declaration declaration = Declaration {
-		.name = get_name(node),
+		.name = get_pascal_name(node),
 		.description = get_description(node.child("description")),
 		.since = get_since(node),
 		.is_destructor = get_destructor(node),
@@ -177,7 +181,7 @@ Declaration get_declaration(const pugi::xml_node& node) {
 
 Enum get_enum(const pugi::xml_node& node) {
 	Enum enum_ret = Enum {
-		.name = get_name(node),
+		.name = get_pascal_name(node),
 		.description = get_description(node.child("description")),
 		.since = get_since(node),
 		.bitfield = get_bitfield(node),
@@ -185,7 +189,7 @@ Enum get_enum(const pugi::xml_node& node) {
 
 	for (pugi::xml_node node : node.children("entry")) {
 		enum_ret.entries.push_back(Entry {
-			.name = get_name(node),
+			.name = get_pascal_name(node),
 			.description = get_description(node),
 			.value = get_entry_value(node),
 			.since = get_since(node),
@@ -207,14 +211,14 @@ std::vector<Protocol> get_protocols() {
 
 		for (pugi::xml_node node : doc.children("protocol")) {
 			Protocol protocol = Protocol {
-				.name = get_name(node),
+				.name = get_pascal_name(node),
 				.copyright = optional_string(node, "copyright"),
 				.description = get_description(node),
 			};
 
 			for (pugi::xml_node node : node.children("interface")) {
 				Interface interface = Interface {
-					.name = get_name(node),
+					.name = get_pascal_name(node),
 					.description = get_description(node),
 					.version = node.attribute("version").as_uint(),
 				};

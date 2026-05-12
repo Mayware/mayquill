@@ -1,52 +1,52 @@
 module;
+#include <cassert>
 #include <cerrno>
-#include <cstdint>
 #include <stdexcept>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-export module Server;
+export module MayQuill;
 import std;
 import Util;
 
-struct Client {
-	uint64_t id;
+export import :Generated;
+
+constexpr std::size_t HEADER_SIZE = 8;
+
+struct Header {
+    std::uint32_t object_id;
+    std::uint16_t size;
+    std::uint16_t opcode;
 };
 
-namespace Wire {
+struct Client {
+	std::uint64_t id;
 
-/*
- *  Types:
- *  int / uint : 32 bits
- *  fixed point: 24 bits whole, 8 bits decimal
- *  object     : 32 bits
- *  new_id     : 32 bits
- *  string     : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits), \0 terminator
- *  array      : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits
- *  fd         : 0 bits, stored in ancillary data of the message
- *  enum       : 32 bits integer
- */
-enum class Types {
-	Int,
-	Uint,
-	Fixed,
-	Object,
-	NewId,
-	String,
-	Fd,
-	Enum
+	int fd;
+	std::unordered_map<std::uint32_t, Interface> objects;
+
+	bool reading_header = true;
+	std::uint16_t bytes_needed = HEADER_SIZE;
+	std::vector<std::uint8_t> message;
+
+	void parse_message() {
+        Header header;
+        std::memcpy(&header, this->message.data(), sizeof(Header));
+
+        Interface object = this->objects.at(header.object_id);
+	}
 };
 
 class Server {
+
   private:
 	int fd;
 	util::IncCounter next_id;
-	// fd -> Client
-	std::unordered_map<int, Client> clients;
+	std::vector<Client> clients;
 
   public:
-	static Server &get() {
+	static Server& get() {
 		static Server instance;
 		return instance;
 	}
@@ -58,7 +58,7 @@ class Server {
 			directory = runtime ? *runtime : "/run/user/1000";
 		}
 
-		// Check for the next free /run/user/uid/wayland-X
+		// Check for the next free /run/user/uid/wayland-i
 		for (int i = 0; i < 9; i++) {
 			auto current_directory = std::format("{}/wayland-{}", directory, i);
 			if (!std::filesystem::exists(current_directory)) {
@@ -74,11 +74,11 @@ class Server {
 		}
 
 		// Bind the socket to the address
-		sockaddr_un address{.sun_family = AF_UNIX};
+		sockaddr_un address {.sun_family = AF_UNIX};
 		strncpy(address.sun_path, directory.c_str(), sizeof(address.sun_path) - 1);
 
 		// Reason to cast: https://stackoverflow.com/a/57431271
-		if (bind(fd, (sockaddr *)&address, sizeof(address)) < 0) {
+		if (bind(fd, (sockaddr*)&address, sizeof(address)) < 0) {
 			throw std::runtime_error(std::format("Failed to bind to socket at {}, {}", directory, std::strerror(errno)));
 		}
 
@@ -105,25 +105,24 @@ class Server {
 			}
 
 			// New client accepted
-			this->clients[fd] = Client{
-				.id = next_id.next()};
+			this->clients.push_back(Client {
+				.id = this->next_id.next(),
+				.fd = fd,
+			});
 		}
 	}
 
-	/*
-	 *  Message form:
-	 *
+	/* Message form:
 	 *  Object Id | Message Size (including header) | Opcode | Arguments then based on opcode
 	 *  32 bit    | 16 bit                          | 16 bit | Message Size - 64 bits
-	 *
 	 */
-	void dispatch() {
-		for (auto &[fd, client] : this->clients) {
-			std::vector<uint8_t> message;
-			uint8_t buffer[64];
+	void try_listen() {
+		for (auto& client : this->clients) {
+			std::uint8_t buffer[64]; // (Remember, this is bytes)
 
 			while (true) {
-				int bytes_read = recv(fd, &buffer[0], sizeof(buffer), 0);
+				int bytes_read = recv(fd, &buffer[0], client.bytes_needed, 0);
+
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
 					this->remove_client(fd);
@@ -136,12 +135,34 @@ class Server {
 						// potentially clean up client before this, also don't throw
 					}
 				}
+				client.bytes_needed -= bytes_read;
+				client.message.insert(client.message.end(), buffer, buffer + bytes_read);
 
-				message.insert(message.end(), buffer, buffer + bytes_read);
+				/*
+				 * The listener works in two modes - reading the header, or the rest of the body
+				 * It is in header mode, until 48 bits (6 bytes) are read. At that point, it
+				 * reads how many bytes the entire message is from the last 2 bytes, and then
+				 * swaps to reading the rest of the body. Once those target bytes are met, the
+				 * message should be complete, so it can be parsed and it can all restart.
+				 * Of course, this is per client
+				 */
+				if (client.bytes_needed == 0) {
+					if (client.reading_header) {
+						assert(client.message.size() == HEADER_SIZE && "message header should only be 48 bits");
+						// Read the Message size (so 4 bytes in), to get the opcode + argument size
+                        // I would like to be explictly be 0 copy, but i can't find how to do such without UB
+						std::memcpy(&client.bytes_needed, client.message.data() + 4, sizeof(std::uint16_t));
+                        // Discount the header size from the total message size
+                        client.bytes_needed -= HEADER_SIZE;
+					} else {
+						client.bytes_needed = HEADER_SIZE;
+						// Handle the message
+					}
+					client.reading_header = !client.reading_header;
+				}
 			}
 		}
 	}
 
 	void remove_client(int fd) {}
 };
-} // namespace Wire
