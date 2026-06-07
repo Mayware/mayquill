@@ -110,33 +110,36 @@ int main() {
 			content += std::format("export struct {} {{\n"
 								   "    // These are the only runtime mutable states\n"
 								   "    std::uint32_t object_id;\n"
-								   "    std::uint32_t client_id;\n\n",
+								   "    std::uint32_t client_id;\n",
 				interface.name);
 
 			for (auto& request : interface.requests) {
-				content += std::format("    struct {} {{", request.name);
+				content += std::format("\n    struct {} {{", request.name);
 
 				for (auto& arg : request.arguments) {
 					// TODO, full arg parsing
 					content += std::format(" {} {};", arg.type, arg.name);
 				}
-				content += " };\n";
+				content += " };";
 			}
 
-			content += "\n";
-			content += "    using Request = std::variant<";
+			// Only generate the requests & handle method, if any requests actually exist
+			// If we didn't do this, we'd have an empty variant, which is invalid
+			// This will however mean some structs do not have requests / handles, and so will need to be handled
+			if (!interface.requests.empty()) {
+				content += "\n\n    using Request = std::variant<";
 
-			for (std::size_t i = 0; i < interface.requests.size(); ++i) {
-				content += interface.requests[i].name;
-				if (i == interface.requests.size() - 1) {
-					continue;
+				for (std::size_t i = 0; i < interface.requests.size(); ++i) {
+					content += interface.requests[i].name;
+					if (i == interface.requests.size() - 1) {
+						continue;
+					}
+					content += ", ";
 				}
-				content += ", ";
+				content += ">;\n"
+						   "    void handle(Request request); // Will be overidden by downstream user\n";
 			}
-			content += ">;\n"
-					   "    void handle(Request request); // Will be overidden by downstream user\n"
-					   "};\n";
-			// "};";
+			content += "};\n";
 
 			write_file(interface.name, std::move(content));
 		}

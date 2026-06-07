@@ -15,9 +15,9 @@ export import :Generated;
 constexpr std::size_t HEADER_SIZE = 8;
 
 struct Header {
-    std::uint32_t object_id;
-    std::uint16_t size;
-    std::uint16_t opcode;
+	std::uint32_t object_id;
+	std::uint16_t size;
+	std::uint16_t opcode;
 };
 
 struct Client {
@@ -30,11 +30,47 @@ struct Client {
 	std::uint16_t bytes_needed = HEADER_SIZE;
 	std::vector<std::uint8_t> message;
 
-	void parse_message() {
-        Header header;
-        std::memcpy(&header, this->message.data(), sizeof(Header));
+	template<typename T>
+	T deserialise() {
+		std::vector<std::uint8_t> argument_data(
+			this->message.begin() + sizeof(Header),
+			this->message.end());
 
-        Interface object = this->objects.at(header.object_id);
+
+	};
+
+	void parse_message() {
+		Header header;
+		std::memcpy(&header, this->message.data(), sizeof(Header));
+
+		Interface object = this->objects.at(header.object_id);
+
+		std::visit([](auto& interface) {
+			// Get the actual type
+			using T = std::decay_t<decltype(interface)>;
+
+			// Check if the nested request type exists
+			// If it does, we'll parse the args accordingly
+			// If it doesn't, then there shouldn't be any args
+			if constexpr (requires { typename T::Request; }) {
+#ifndef __clang__
+				// Template for stamps out each iteration at compile time
+				// This is needed, as getting the variant at an index requires a comptime value
+				// Template for only supports range-based syntax, hence the iota
+				template for (constexpr auto i : std::views::iota(0z, std::variant_size_v<T::Request>)) {
+					// I tried to find a way to do a jump table directly, but was unable to
+					// In reality, it will probably optimise to if statements since there are few cases
+					// but this is something I want to come back to
+					if (header.opcode == i) {
+						using Alternative = std::variant_alternative_t<i, typename T::Request>;
+						deserialise<Alternative>();
+						break;
+					}
+				}
+#endif
+			}
+		},
+			object);
 	}
 };
 
@@ -150,10 +186,10 @@ class Server {
 					if (client.reading_header) {
 						assert(client.message.size() == HEADER_SIZE && "message header should only be 48 bits");
 						// Read the Message size (so 4 bytes in), to get the opcode + argument size
-                        // I would like to be explictly be 0 copy, but i can't find how to do such without UB
+						// I would like to be explictly be 0 copy, but i can't find how to do such without UB
 						std::memcpy(&client.bytes_needed, client.message.data() + 4, sizeof(std::uint16_t));
-                        // Discount the header size from the total message size
-                        client.bytes_needed -= HEADER_SIZE;
+						// Discount the header size from the total message size
+						client.bytes_needed -= HEADER_SIZE;
 					} else {
 						client.bytes_needed = HEADER_SIZE;
 						// Handle the message
