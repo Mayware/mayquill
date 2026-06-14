@@ -19,15 +19,15 @@ export namespace parser {
  *  enum       : 32 bits integer
  */
 std::unordered_map<std::string, std::string> types = {
-	{"int", "std::int32_t"},
-	{"uint", "std::uint32_t"},
-	{"fixed", "std::int32_t"},
-	{"object", "std::uint32_t"},
-	{"new_id", "std::uint32_t"},
-	{"string", "std::string"},
-	{"array", "void*"},
-	{"fd", "int"},
-	{"enum", "std::uint32_t"},
+	{"int", "[[=WlType::Int]] std::int32_t"},
+	{"uint", "[[=WlType::Int]] std::uint32_t"},
+	{"fixed", "[[=WlType::Fixed]] std::int32_t"},
+	{"object", "[[=WlType::Object]] std::uint32_t"},
+	{"new_id", "[[=WlType::NewId]] std::uint32_t"},
+	{"string", "[[=WlType::String]] std::string"},
+	{"array", "[[=WlType::Array]] void*"},
+	{"fd", "[[=WlType::Fd]] int"},
+	{"enum", "[[=WlType::Enum]] std::uint32_t"},
 };
 
 // We do not parse frozen, or deprecated-since
@@ -49,29 +49,29 @@ struct Declaration {
 	std::string name;
 	Description description;
 	std::vector<Argument> arguments;
-	uint since;
+    std::uint32_t since;
 	bool is_destructor;
 };
 
 struct Entry {
 	std::string name;
 	Description description;
-	int value;
-	uint since;
+    std::int32_t value;
+	std::uint32_t since;
 };
 
 struct Enum {
 	std::string name;
 	Description description;
 	std::vector<Entry> entries;
-	uint since;
+	std::uint32_t since;
 	bool bitfield;
 };
 
 struct Interface {
 	std::string name;
 	Description description;
-	uint version;
+	std::uint32_t version;
 	std::vector<Declaration> requests;
 	std::vector<Declaration> events;
 	std::vector<Enum> enums;
@@ -117,7 +117,7 @@ Description get_description(const pugi::xml_node& node) {
 	return description;
 }
 
-uint get_since(const pugi::xml_node& node) {
+std::uint32_t get_since(const pugi::xml_node& node) {
 	auto since = node.attribute("since");
 	return since ? since.as_uint() : 1;
 }
@@ -149,7 +149,7 @@ std::string get_name(const pugi::xml_node& node) {
     return node.attribute("name").as_string();
 }
 
-int get_entry_value(const pugi::xml_node& node) {
+std::int32_t get_entry_value(const pugi::xml_node& node) {
 	// From the docs: https://pugixml.org/docs/manual.html#access.attrdata
 	// the default as_int doesn't mention octal support, which is technically
 	// valid although I haven't seen it be used in wayland.xml itself.

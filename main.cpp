@@ -71,7 +71,8 @@ int main() {
 		std::string content = "";
 		add_header(content);
 		content += "export module MayQuill:Generated;\n"
-				   "import std;\n";
+				   "import std;\n"
+                   "import shared;\n";
 
 		// Write the imports
 		for (auto& protocol : protocols) {

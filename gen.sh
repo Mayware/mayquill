@@ -8,7 +8,10 @@ rm -rf build-lsp
 rm -rf compile_commands.json
 
 echo -e "\033[0;32mGenerating GCC\033[0m"
-cmake -B build -G Ninja -Wno-dev
+cmake -B build -G Ninja -Wno-dev \
+    -DCMAKE_C_COMPILER=gcc \
+    -DCMAKE_CXX_COMPILER=g++ \
+    # -DCMAKE_CXX_FLAGS="-std=gnu++26 -freflection"
 
 echo -e "\033[0;32mGenerating Clang\033[0m"
 cmake -B build-lsp -G Ninja -Wno-dev \
