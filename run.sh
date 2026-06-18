@@ -3,9 +3,9 @@ set -e
 cd "$(dirname "$0")"
 
 echo -e "\033[0;32mBuilding lsp\033[0m"
-ninja -C build-lsp
+ninja -C build/build-lsp
 
 echo -e "\033[0;32mBuilding regular\033[0m"
-ninja -C build
+ninja -C build/build-mayquill
 
-./build/mayquill
+# ./build/build-mayquill/mayquill

@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 4.1.2)
 
 #> https://github.com/Kitware/CMake/blob/v4.3.2/Help/dev/experimental.rst#c-import-std-support
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
-
 set(CMAKE_CXX_MODULE_STD ON)
+
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -15,16 +15,12 @@ endif()
 project(mayquill)
 add_executable(mayquill)
 
-file(GLOB_RECURSE GEN_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/out/*.cppm")
+file(GLOB_RECURSE GEN_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/build/generated-modules/*.cppm")
+file (GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cppm")
 target_sources(mayquill
     PRIVATE
-        main.cpp
+        src/main.cpp
     PRIVATE FILE_SET CXX_MODULES FILES
-        util.cppm
-        wire.cppm
-        parser.cppm
+        ${SRC_FILES}
         ${GEN_FILES}
 )
-
-find_package(pugixml REQUIRED)
-target_link_libraries(mayquill PRIVATE pugixml::pugixml)

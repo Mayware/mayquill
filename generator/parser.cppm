@@ -202,7 +202,7 @@ Enum get_enum(const pugi::xml_node& node) {
 std::vector<Protocol> get_protocols() {
 	std::vector<Protocol> protocols;
 
-	for (const auto& entry : std::filesystem::directory_iterator("./in")) {
+	for (const auto& entry : std::filesystem::directory_iterator("./spec")) {
 		pugi::xml_document doc;
 		pugi::xml_parse_result result = doc.load_file(entry.path().c_str());
 		if (!result) {

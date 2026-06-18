@@ -59,7 +59,7 @@ void add_header(std::string& target) {
 }
 
 void write_file(std::string name, std::string content) {
-	std::ofstream file(std::format("out/{}.cppm", pascal_to_snake(name)));
+	std::ofstream file(std::format("build/generated-modules/{}.cppm", pascal_to_snake(name)));
 	std::print(file, "{}", content);
 }
 
@@ -72,7 +72,7 @@ int main() {
 		add_header(content);
 		content += "export module MayQuill:Generated;\n"
 				   "import std;\n"
-                   "import shared;\n";
+                   "import Shared;\n";
 
 		// Write the imports
 		for (auto& protocol : protocols) {
@@ -104,7 +104,9 @@ int main() {
 			content += std::format(
 				// "module;\n"
 				"export module {}.{};\n"
-				"import std;\n\n",
+				"import std;\n"
+                "import Shared;\n"
+                "using namespace shared;\n\n",
 				protocol.name, interface.name);
 
 			// content += std::format("export namespace {} {{\n", protocol.name);
@@ -119,7 +121,7 @@ int main() {
 
 				for (auto& arg : request.arguments) {
 					// TODO, full arg parsing
-					content += std::format(" {} {};", arg.type, arg.name);
+					content += std::format("\n#ifndef __clang__\n {} {};\n #endif\n", arg.type, arg.name);
 				}
 				content += " };";
 			}
