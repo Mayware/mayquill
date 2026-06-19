@@ -4,10 +4,10 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-export module MayQuill;
-import Util;
+export module mayquill;
+import util;
 
-export import :Generated;
+export import :generated;
 
 constexpr std::size_t HEADER_SIZE = 8;
 

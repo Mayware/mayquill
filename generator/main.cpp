@@ -70,9 +70,9 @@ int main() {
 	{
 		std::string content = "";
 		add_header(content);
-		content += "export module MayQuill:Generated;\n"
+		content += "export module mayquill:generated;\n"
 				   "import std;\n"
-                   "import Shared;\n";
+                   "import shared;\n";
 
 		// Write the imports
 		for (auto& protocol : protocols) {
@@ -85,7 +85,7 @@ int main() {
 		content += "\nusing Interface = std::variant<";
 		for (auto& protocol : protocols) {
 			for (std::size_t i = 0; i < protocol.interfaces.size(); ++i) {
-				content += protocol.interfaces[i].name;
+				content += parser::snake_to_pascal(protocol.interfaces[i].name);
 				if (i == protocol.interfaces.size() - 1) {
 					continue;
 				}
@@ -105,7 +105,7 @@ int main() {
 				// "module;\n"
 				"export module {}.{};\n"
 				"import std;\n"
-                "import Shared;\n"
+                "import shared;\n"
                 "using namespace shared;\n\n",
 				protocol.name, interface.name);
 
@@ -114,7 +114,7 @@ int main() {
 								   "    // These are the only runtime mutable states\n"
 								   "    std::uint32_t object_id;\n"
 								   "    std::uint32_t client_id;\n",
-				interface.name);
+				parser::snake_to_pascal(interface.name));
 
 			for (auto& request : interface.requests) {
 				content += std::format("\n    struct {} {{", request.name);

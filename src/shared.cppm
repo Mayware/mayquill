@@ -1,5 +1,4 @@
-export module Shared;
-
+export module shared;
 export namespace shared {
 enum class WlType {
 	Int,

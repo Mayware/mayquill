@@ -1,5 +1,5 @@
 module;
-export module Util;
+export module util;
 import std;
 
 export namespace util {

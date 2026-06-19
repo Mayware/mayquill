@@ -211,14 +211,14 @@ std::vector<Protocol> get_protocols() {
 
 		for (pugi::xml_node node : doc.children("protocol")) {
 			Protocol protocol = Protocol {
-				.name = get_pascal_name(node),
+				.name = get_name(node),
 				.copyright = optional_string(node, "copyright"),
 				.description = get_description(node),
 			};
 
 			for (pugi::xml_node node : node.children("interface")) {
 				Interface interface = Interface {
-					.name = get_pascal_name(node),
+					.name = get_name(node),
 					.description = get_description(node),
 					.version = node.attribute("version").as_uint(),
 				};
