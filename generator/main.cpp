@@ -105,9 +105,13 @@ int main() {
 				// "module;\n"
 				"export module {}.{};\n"
 				"import std;\n"
-				"import shared;\n"
-				"using namespace shared;\n\n",
+				"import shared;\n",
 				protocol.name, interface.name);
+
+            for (auto& required_interface : interface.required_interfaces) {
+                content += std::format("import {}.{};\n", protocol.name, required_interface);
+            }
+            content += "using namespace shared;\n\n",
 
 			// content += std::format("export namespace {} {{\n", protocol.name);
 			content += std::format("export struct {} {{\n"
@@ -130,7 +134,7 @@ int main() {
 
 				for (auto& arg : request.arguments) {
 					// TODO, full arg parsing
-					content += std::format("#ifndef __clang__\n       {} {};\n #endif\n", arg.type, arg.name);
+					content += std::format("#ifndef __clang__\n       {} {};\n#endif\n", arg.type, arg.name);
 				}
 				content += "    };\n";
 			}
