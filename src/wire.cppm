@@ -6,8 +6,11 @@ module;
 #include <unistd.h>
 export module mayquill;
 import util;
+import shared;
 
 export import :generated;
+
+using namespace shared;
 
 constexpr std::size_t HEADER_SIZE = 8;
 
@@ -27,27 +30,50 @@ struct Client {
 	std::uint16_t bytes_needed = HEADER_SIZE;
 	std::vector<std::uint8_t> message;
 
-// 	template<typename T>
-// 	T deserialise() {
-// 		std::vector<std::uint8_t> argument_data(
-// 			this->message.begin() + sizeof(Header),
-// 			this->message.end());
+	template<typename T>
+	T deserialise_field(WlType wl_type) {
+		return T {};
+	}
 
-// #ifndef __clang__
-// 		constexpr auto fields = std::meta::members_of(^^T, std::meta::access_context::unchecked());
-// 		return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> T {
-// 			std::size_t offset = 0;
-// 			return T {
-// 				[&]() -> typename[:std::meta::type_of(fields[Is]):] {
-// 					// fields[Is] — get the Ith field using the current index
-// 					constexpr auto field = fields[Is];
-// 					constexpr auto ann = std::meta::annotations_of_with_type(field, ^^WlType);
-// 					constexpr WlType wl = std::meta::extract<WlType>(ann[0]);
-// 				}()...
-// 			};
-// 		}(std::make_index_sequence<fields.size()> {});
-// #endif
-// 	};
+	template<typename T>
+	T deserialise_struct() {
+		std::vector<std::uint8_t> argument_data(
+			this->message.begin() + sizeof(Header),
+			this->message.end());
+#ifndef __clang__
+		static constexpr auto fields = std::define_static_array(
+			std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
+
+        // Precompute the WlType tags in another lambda, rather directly in the Return T lambda / code part.
+        // This is required as when we previously did it there, the lambda would be promoted to consteval,
+        // since reflection was used, but then client (ie. this, runtime data) was required, thus violating consteval.
+        // Instead, we compute wl types in its own consteval lambda, which is then static and so can be read by the runtime lambda.
+        // I've left the previous incorrect approach at the bottom, for the sake of learning.
+		static constexpr auto wl_types = []() {
+			std::array<WlType, fields.size()> array {};
+			template for (constexpr auto i : std::views::iota(0uz, fields.size())) {
+				array[i] = std::meta::extract<WlType>(std::meta::annotations_of(fields[i])[0]);
+			}
+			return array;
+		}();
+
+		return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
+			return T {
+				this->deserialise_field<typename[:std::meta::type_of(fields[n]):]>(wl_types[n])...};
+		}(std::make_index_sequence<fields.size()> {});
+#endif
+
+        // Previous incorect approach, deserialise field is runtime data (since it requires client)
+		// return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
+		// 	return T {
+		// 		[this]() -> typename[:std::meta::type_of(fields[n]):] {
+		// 			constexpr auto field = fields[n];
+		// 			constexpr WlType wl_type = std::meta::extract<WlType>(std::meta::annotations_of(field)[0]);
+		// 			return this->deserialise_field<[:std::meta::type_of(field):]>(wl_type);
+		// 		}()...};
+		// }(std::make_index_sequence<fields.size()> {});
+
+	}
 
 	void parse_message() {
 		Header header;
@@ -73,7 +99,7 @@ struct Client {
 					// but this is something I want to come back to
 					if (header.opcode == i) {
 						using Alternative = std::variant_alternative_t<i, typename T::Request>;
-						// deserialise<Alternative>();
+						deserialise_struct<Alternative>();
 						break;
 					}
 				}
