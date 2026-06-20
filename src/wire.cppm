@@ -57,6 +57,10 @@ struct Client {
 			return array;
 		}();
 
+        // The parameter pack (and hence, outer lambda) approach is required for aggregate intiialisation because
+        // ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
+        // of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
+        // type between the n, but this defines it as they must all be of size_t.
 		return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
 			return T {
 				this->deserialise_field<typename[:std::meta::type_of(fields[n]):]>(wl_types[n])...};

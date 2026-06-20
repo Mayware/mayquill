@@ -72,7 +72,7 @@ int main() {
 		add_header(content);
 		content += "export module mayquill:generated;\n"
 				   "import std;\n"
-                   "import shared;\n";
+				   "import shared;\n";
 
 		// Write the imports
 		for (auto& protocol : protocols) {
@@ -105,8 +105,8 @@ int main() {
 				// "module;\n"
 				"export module {}.{};\n"
 				"import std;\n"
-                "import shared;\n"
-                "using namespace shared;\n\n",
+				"import shared;\n"
+				"using namespace shared;\n\n",
 				protocol.name, interface.name);
 
 			// content += std::format("export namespace {} {{\n", protocol.name);
@@ -116,21 +116,30 @@ int main() {
 								   "    std::uint32_t client_id;\n",
 				parser::snake_to_pascal(interface.name));
 
+			for (auto& wlenum : interface.enums) {
+				content += std::format("\n    enum class {} {{\n", wlenum.name);
+
+				for (auto& entry : wlenum.entries) {
+					content += std::format("        {} = {},\n", entry.name, entry.value);
+				}
+				content += "    };\n";
+			}
+
 			for (auto& request : interface.requests) {
-				content += std::format("\n    struct {} {{", request.name);
+				content += std::format("\n    struct {} {{\n", request.name);
 
 				for (auto& arg : request.arguments) {
 					// TODO, full arg parsing
-					content += std::format("\n#ifndef __clang__\n {} {};\n #endif\n", arg.type, arg.name);
+					content += std::format("#ifndef __clang__\n       {} {};\n #endif\n", arg.type, arg.name);
 				}
-				content += " };";
+				content += "    };\n";
 			}
 
 			// Only generate the requests & handle method, if any requests actually exist
 			// If we didn't do this, we'd have an empty variant, which is invalid
 			// This will however mean some structs do not have requests / handles, and so will need to be handled
 			if (!interface.requests.empty()) {
-				content += "\n\n    using Request = std::variant<";
+				content += "\n    using Request = std::variant<";
 
 				for (std::size_t i = 0; i < interface.requests.size(); ++i) {
 					content += interface.requests[i].name;

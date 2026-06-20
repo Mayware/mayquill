@@ -1,4 +1,5 @@
 module;
+#include <cctype>
 #include <pugixml.hpp>
 export module Parser;
 import std;
@@ -6,29 +7,6 @@ import std;
 export namespace parser {
 
 // Useful docs: https://wayland.freedesktop.org/docs/book/Message_XML.html
-
-/*
- *  Types:
- *  int / uint : 32 bits
- *  fixed point: 24 bits whole, 8 bits decimal
- *  object     : 32 bits
- *  new_id     : 32 bits
- *  string     : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits), \0 terminator
- *  array      : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits
- *  fd         : 0 bits, stored in ancillary data of the message
- *  enum       : 32 bits integer
- */
-std::unordered_map<std::string, std::string> types = {
-	{"int", "[[=WlType::Int]] std::int32_t"},
-	{"uint", "[[=WlType::Int]] std::uint32_t"},
-	{"fixed", "[[=WlType::Fixed]] std::int32_t"},
-	{"object", "[[=WlType::Object]] std::uint32_t"},
-	{"new_id", "[[=WlType::NewId]] std::uint32_t"},
-	{"string", "[[=WlType::String]] std::string"},
-	{"array", "[[=WlType::Array]] void*"},
-	{"fd", "[[=WlType::Fd]] int"},
-	{"enum", "[[=WlType::Enum]] std::uint32_t"},
-};
 
 // We do not parse frozen, or deprecated-since
 struct Description {
@@ -98,6 +76,47 @@ std::string snake_to_pascal(std::string target) {
     return target;
 }
 
+/*
+ *  Types:
+ *  int / uint : 32 bits
+ *  fixed point: 24 bits whole, 8 bits decimal
+ *  object     : 32 bits
+ *  new_id     : 32 bits
+ *  string     : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits), \0 terminator
+ *  array      : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits
+ *  fd         : 0 bits, stored in ancillary data of the message
+ *  enum       : 32 bits integer, accompanied alongside the main type of int / uint
+ */
+std::string convert_type(pugi::xml_node& node) {
+    std::string_view type = node.attribute("type").as_string();
+
+    // We just return the enum class directory, no need to worry about further types
+    if (auto enum_choice = node.attribute("enum")) {
+        return "[[=WlType::Enum]] " + snake_to_pascal(enum_choice.as_string()) + "Enum";
+    }
+
+    if (type == "int") {
+        return "[[=WlType::Int]] std::int32_t";
+    } else if (type == "uint") {
+        return "[[=WlType::Uint]] std::uint32_t";
+    } else if (type == "fixed") {
+        return "[[=WlType::Fixed]] std::int32_t";
+    } else if (type == "object") {
+        return "[[=WlType::Object]] std::uint32_t";
+    } else if (type == "new_id") {
+        return "[[=WlType::NewId]] std::uint32_t";
+    } else if (type == "string") {
+        return "[[=WlType::String]] std::string";
+    } else if (type == "array") {
+        return "[[=WlType::Array]] void*";
+    } else if (type == "fd") {
+        return "[[=WlType::Fd]] int";
+    }
+
+    throw std::invalid_argument(
+        "Incorrect wayland type passed, " + std::string(type)
+    );
+}
 
 std::optional<std::string> optional_string(const pugi::xml_node& node, const char* name) {
 	auto attribute = node.attribute(name);
@@ -168,7 +187,7 @@ Declaration get_declaration(const pugi::xml_node& node) {
 	for (pugi::xml_node node : node.children("arg")) {
 		declaration.arguments.push_back(Argument {
 			.name = get_name(node),
-			.type = types[node.attribute("type").as_string()],
+			.type = convert_type(node),
 			.description = get_description(node),
 			.interface_name = optional_string(node, "interface"),
 			.enum_name = optional_string(node, "enum"),
@@ -181,15 +200,22 @@ Declaration get_declaration(const pugi::xml_node& node) {
 
 Enum get_enum(const pugi::xml_node& node) {
 	Enum enum_ret = Enum {
-		.name = get_pascal_name(node),
+		.name = get_pascal_name(node) + "Enum",
 		.description = get_description(node.child("description")),
 		.since = get_since(node),
 		.bitfield = get_bitfield(node),
 	};
 
 	for (pugi::xml_node node : node.children("entry")) {
+
+        // Spec is retarded and sometimes uses numbers as the name, so we need to prefix it to make it valid
+        auto name = get_pascal_name(node);
+        if (std::isdigit(name.front())) {
+            name.insert(name.begin(), '_'); // Prefix it with _ if so
+        }
+
 		enum_ret.entries.push_back(Entry {
-			.name = get_pascal_name(node),
+			.name = name,
 			.description = get_description(node),
 			.value = get_entry_value(node),
 			.since = get_since(node),
