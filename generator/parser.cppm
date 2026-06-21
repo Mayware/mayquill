@@ -1,7 +1,7 @@
 module;
 #include <cctype>
 #include <pugixml.hpp>
-export module Parser;
+export module parser;
 import std;
 
 export namespace parser {

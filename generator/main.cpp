@@ -1,5 +1,5 @@
 import std;
-import Parser;
+import parser;
 
 // // Prepends a prefix (shocked emoji) to the start of each line
 // std::string prepend(std::string target, const std::string& prefix) {
@@ -99,6 +99,7 @@ int main() {
 	// Write the individual interfaces
 	for (auto& protocol : protocols) {
 		for (auto& interface : protocol.interfaces) {
+			std::string struct_name = parser::snake_to_pascal(interface.name);
 			std::string content = "";
 			add_header(content);
 			content += std::format(
@@ -108,17 +109,17 @@ int main() {
 				"import shared;\n",
 				protocol.name, interface.name);
 
-            for (auto& required_interface : interface.required_interfaces) {
-                content += std::format("import {}.{};\n", protocol.name, required_interface);
-            }
-            content += "using namespace shared;\n\n",
+			for (auto& required_interface : interface.required_interfaces) {
+				content += std::format("import {}.{};\n", protocol.name, required_interface);
+			}
+			content += "using namespace shared;\n\n";
 
 			// content += std::format("export namespace {} {{\n", protocol.name);
 			content += std::format("export struct {} {{\n"
 								   "    // These are the only runtime mutable states\n"
 								   "    std::uint32_t object_id;\n"
 								   "    std::uint32_t client_id;\n",
-				parser::snake_to_pascal(interface.name));
+				struct_name);
 
 			for (auto& wlenum : interface.enums) {
 				content += std::format("\n    enum class {} {{\n", wlenum.name);
@@ -155,8 +156,18 @@ int main() {
 				content += ">;\n"
 						   "    void handle(Request request); // Will be overidden by downstream user\n";
 			}
-			content += "};\n";
+			content += "};\n\n";
 
+			// Only generate a default unhandled handle method, if requests exist
+			if (!interface.requests.empty()) {
+				content += std::format(
+					"// Default implementation, linker will prefer the implementation you provide, since we've marked this one as weak (absolutely ratioed)\n"
+					"[[gnu::weak]]\n"
+					"void {}::handle(Request request) {{\n"
+					"    std::println(\"{}::handle(Request request) is currently unimplemented, request will be ignored\");\n"
+					"}}\n",
+					struct_name, struct_name, struct_name);
+			}
 			write_file(interface.name, std::move(content));
 		}
 	}

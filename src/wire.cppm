@@ -7,17 +7,19 @@ module;
 export module mayquill;
 import util;
 import shared;
+import wayland.wl_display;
 
 export import :generated;
 
 using namespace shared;
 
+export namespace mayquill {
 constexpr std::size_t HEADER_SIZE = 8;
 
 struct Header {
 	std::uint32_t object_id;
-	std::uint16_t size;
 	std::uint16_t opcode;
+	std::uint16_t size;
 };
 
 struct Client {
@@ -27,28 +29,58 @@ struct Client {
 	std::unordered_map<std::uint32_t, Interface> objects;
 
 	bool reading_header = true;
-	std::uint16_t bytes_needed = HEADER_SIZE;
+	std::int32_t bytes_needed = HEADER_SIZE;
 	std::vector<std::uint8_t> message;
+	std::size_t read_offset = 0;
 
 	template<typename T>
 	T deserialise_field(WlType wl_type) {
-		return T {};
+		switch (wl_type) {
+		case WlType::Int:
+		case WlType::Uint:
+		case WlType::Object:
+		case WlType::NewId:
+		case WlType::Enum: {
+			std::uint32_t raw;
+			std::memcpy(&raw, this->message.data() + sizeof(Header) + this->read_offset, sizeof(raw));
+			this->read_offset += sizeof(raw);
+			T value;
+			assert(sizeof(std::uint32_t) == sizeof(T));
+			std::memcpy(&value, &raw, sizeof(raw));
+			return value;
+		}
+
+		case WlType::Fixed: {
+			assert(false && "Fixed handling not implemented");
+		}
+
+		case WlType::Fd: {
+			assert(false && "Fd handling not implemented");
+		}
+
+		case WlType::String: {
+			assert(false && "String handling not implemented");
+		}
+
+		case WlType::Array: {
+			assert(false && "Array handling not implemented");
+		}
+		}
+		throw std::invalid_argument("Invalid WlType");
 	}
 
 	template<typename T>
 	T deserialise_struct() {
-		std::vector<std::uint8_t> argument_data(
-			this->message.begin() + sizeof(Header),
-			this->message.end());
+		this->read_offset = 0;
 #ifndef __clang__
 		static constexpr auto fields = std::define_static_array(
 			std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
 
-        // Precompute the WlType tags in another lambda, rather directly in the Return T lambda / code part.
-        // This is required as when we previously did it there, the lambda would be promoted to consteval,
-        // since reflection was used, but then client (ie. this, runtime data) was required, thus violating consteval.
-        // Instead, we compute wl types in its own consteval lambda, which is then static and so can be read by the runtime lambda.
-        // I've left the previous incorrect approach at the bottom, for the sake of learning.
+		// Precompute the WlType tags in another lambda, rather directly in the Return T lambda / code part.
+		// This is required as when we previously did it there, the lambda would be promoted to consteval,
+		// since reflection was used, but then client (ie. this, runtime data) was required, thus violating consteval.
+		// Instead, we compute wl types in its own consteval lambda, which is then static and so can be read by the runtime lambda.
+		// I've left the previous incorrect approach at the bottom, for the sake of learning.
 		static constexpr auto wl_types = []() {
 			std::array<WlType, fields.size()> array {};
 			template for (constexpr auto i : std::views::iota(0uz, fields.size())) {
@@ -57,17 +89,17 @@ struct Client {
 			return array;
 		}();
 
-        // The parameter pack (and hence, outer lambda) approach is required for aggregate intiialisation because
-        // ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
-        // of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
-        // type between the n, but this defines it as they must all be of size_t.
+		// The parameter pack (and hence, outer lambda) approach is required for aggregate intiialisation because
+		// ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
+		// of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
+		// type between the n, but this defines it as they must all be of size_t.
 		return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
 			return T {
 				this->deserialise_field<typename[:std::meta::type_of(fields[n]):]>(wl_types[n])...};
 		}(std::make_index_sequence<fields.size()> {});
 #endif
 
-        // Previous incorect approach, deserialise field is runtime data (since it requires client)
+		// Previous incorect approach, deserialise field is runtime data (since it requires client)
 		// return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
 		// 	return T {
 		// 		[this]() -> typename[:std::meta::type_of(fields[n]):] {
@@ -76,12 +108,12 @@ struct Client {
 		// 			return this->deserialise_field<[:std::meta::type_of(field):]>(wl_type);
 		// 		}()...};
 		// }(std::make_index_sequence<fields.size()> {});
-
 	}
 
 	void parse_message() {
 		Header header;
 		std::memcpy(&header, this->message.data(), sizeof(Header));
+		std::println("Object ID: {}", header.object_id);
 
 		Interface& object = this->objects.at(header.object_id);
 
@@ -103,11 +135,13 @@ struct Client {
 					// but this is something I want to come back to
 					if (header.opcode == i) {
 						using Alternative = std::variant_alternative_t<i, typename T::Request>;
-						deserialise_struct<Alternative>();
-						break;
+						auto alternative = deserialise_struct<Alternative>();
+						interface.handle(alternative);
+						return;
 					}
 				}
 #endif
+				std::println("No opcode matched: {}", header.opcode);
 			}
 		},
 			object);
@@ -122,11 +156,6 @@ class Server {
 	std::vector<Client> clients;
 
   public:
-	static Server& get() {
-		static Server instance;
-		return instance;
-	}
-
 	void bind_socket() {
 		std::string directory;
 		{
@@ -165,6 +194,7 @@ class Server {
 		}
 
 		this->fd = fd;
+		std::println("Bound socket");
 	}
 
 	void accept_clients() {
@@ -181,36 +211,48 @@ class Server {
 			}
 
 			// New client accepted
-			this->clients.push_back(Client {
+			auto client = Client {
 				.id = this->next_id.next(),
 				.fd = fd,
-			});
+			};
+
+			client.objects.emplace(1, WlDisplay {
+										  .object_id = 1,
+										  .client_id = 1, // TODO this is wrong
+									  });
+
+			this->clients.push_back(client);
+			std::println("Accepted a new client");
 		}
 	}
 
 	/* Message form:
-	 *  Object Id | Message Size (including header) | Opcode | Arguments then based on opcode
-	 *  32 bit    | 16 bit                          | 16 bit | Message Size - 64 bits
+	 *  Object Id | Opcode | Message Size (inc header) | Arguments then based on opcode
+	 *  32 bit    | 16 bit | 16 bit                    | Message Size minus 64 bits
 	 */
 	void try_listen() {
 		for (auto& client : this->clients) {
 			std::uint8_t buffer[64]; // (Remember, this is bytes)
 
 			while (true) {
-				int bytes_read = recv(client.fd, &buffer[0], client.bytes_needed, 0);
+				std::uint16_t to_read = std::min<std::uint16_t>(client.bytes_needed, sizeof(buffer));
+				int bytes_read = recv(client.fd, &buffer[0], to_read, 0);
 
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
+					std::println("Client disconnected");
 					this->remove_client(client.fd);
 					break;
 				} else if (bytes_read == -1) {
 					if (errno == EWOULDBLOCK) {
 						break;
 					} else {
-						throw std::runtime_error(std::format("Failed to read from fd {}, {}", fd, std::strerror(errno)));
+						throw std::runtime_error(std::format("Failed to read from fd {}, {}", client.fd, std::strerror(errno)));
 						// potentially clean up client before this, also don't throw
 					}
 				}
+
+				std::println("Read {} bytes", bytes_read);
 				client.bytes_needed -= bytes_read;
 				client.message.insert(client.message.end(), buffer, buffer + bytes_read);
 
@@ -223,16 +265,23 @@ class Server {
 				 * Of course, this is per client
 				 */
 				if (client.bytes_needed == 0) {
+					std::println("No more bytes need to be read, target reached");
 					if (client.reading_header) {
-						assert(client.message.size() == HEADER_SIZE && "message header should only be 48 bits");
-						// Read the Message size (so 4 bytes in), to get the opcode + argument size
+						std::println("Reading header");
+						// Read the Message size (so 6 bytes in), to get the opcode + argument size
 						// I would like to be explictly be 0 copy, but i can't find how to do such without UB
-						std::memcpy(&client.bytes_needed, client.message.data() + 4, sizeof(std::uint16_t));
-						// Discount the header size from the total message size
+						std::uint16_t payload_size;
+						std::memcpy(&payload_size, client.message.data() + 6, sizeof(std::uint16_t));
+						client.bytes_needed = payload_size + client.bytes_needed; // bytes_needed may be negative, if we read more than we needed, hence we add it on
+						// Discount the header size from the total message size, as payload_size includes the header size, and we've already read that
 						client.bytes_needed -= HEADER_SIZE;
+						goto parse_message; // I will change the logic later, uncry your tears
 					} else {
+					parse_message:
+						std::println("Parsing message");
+						client.parse_message();
+						client.message.clear();
 						client.bytes_needed = HEADER_SIZE;
-						// Handle the message
 					}
 					client.reading_header = !client.reading_header;
 				}
@@ -240,5 +289,13 @@ class Server {
 		}
 	}
 
-	void remove_client(int fd) {}
+	void remove_client(int fd) {
+		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
+			if (it->fd == fd) {
+				this->clients.erase(it);
+				break;
+			}
+		}
+	}
 };
+} // namespace mayquill
