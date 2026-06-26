@@ -22,19 +22,20 @@ struct Header {
 	std::uint16_t size;
 };
 
+struct Message {
+    std::vector<std::uint8_t> data;
+    std::vector<int> fds;
+};
+
 struct Client {
 	std::uint64_t id;
 
 	int fd;
 	std::unordered_map<std::uint32_t, Interface> objects;
-
-	bool reading_header = true;
-	std::int32_t bytes_needed = HEADER_SIZE;
-	std::vector<std::uint8_t> message;
-	std::size_t read_offset = 0;
+	std::vector<Message> messages;
 
 	template<typename T>
-	T deserialise_field(WlType wl_type) {
+	T deserialise_field(WlType wl_type, std::vector<std::uint8_t>& message) {
 		switch (wl_type) {
 		case WlType::Int:
 		case WlType::Uint:
@@ -42,8 +43,9 @@ struct Client {
 		case WlType::NewId:
 		case WlType::Enum: {
 			std::uint32_t raw;
-			std::memcpy(&raw, this->message.data() + sizeof(Header) + this->read_offset, sizeof(raw));
-			this->read_offset += sizeof(raw);
+			std::memcpy(&raw, message.data(), sizeof(raw));
+			message.erase(message.begin(), message.begin() + sizeof(raw));
+
 			T value;
 			assert(sizeof(std::uint32_t) == sizeof(T));
 			std::memcpy(&value, &raw, sizeof(raw));
@@ -69,18 +71,18 @@ struct Client {
 		throw std::invalid_argument("Invalid WlType");
 	}
 
+	// T is the GeneratedModule::Request type
 	template<typename T>
-	T deserialise_struct() {
-		this->read_offset = 0;
+	T deserialise_struct(std::vector<std::uint8_t> message) {
+		// Strip the header from the message, we have no more use for it
+		message.erase(message.begin(), message.begin() + sizeof(Header));
+
 #ifndef __clang__
 		static constexpr auto fields = std::define_static_array(
 			std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
 
 		// Precompute the WlType tags in another lambda, rather directly in the Return T lambda / code part.
-		// This is required as when we previously did it there, the lambda would be promoted to consteval,
-		// since reflection was used, but then client (ie. this, runtime data) was required, thus violating consteval.
-		// Instead, we compute wl types in its own consteval lambda, which is then static and so can be read by the runtime lambda.
-		// I've left the previous incorrect approach at the bottom, for the sake of learning.
+        // We need to do this in a separate lambda (i.e. this), because extract must be consteval, which is not what our next lambda is.
 		static constexpr auto wl_types = []() {
 			std::array<WlType, fields.size()> array {};
 			template for (constexpr auto i : std::views::iota(0uz, fields.size())) {
@@ -93,26 +95,16 @@ struct Client {
 		// ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
 		// of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
 		// type between the n, but this defines it as they must all be of size_t.
-		return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
+		return [this, &message]<std::size_t... n>(std::index_sequence<n...>) -> T {
 			return T {
-				this->deserialise_field<typename[:std::meta::type_of(fields[n]):]>(wl_types[n])...};
+				this->deserialise_field<typename[:std::meta::type_of(fields[n]):]>(wl_types[n], message)...};
 		}(std::make_index_sequence<fields.size()> {});
 #endif
-
-		// Previous incorect approach, deserialise field is runtime data (since it requires client)
-		// return [this]<std::size_t... n>(std::index_sequence<n...>) -> T {
-		// 	return T {
-		// 		[this]() -> typename[:std::meta::type_of(fields[n]):] {
-		// 			constexpr auto field = fields[n];
-		// 			constexpr WlType wl_type = std::meta::extract<WlType>(std::meta::annotations_of(field)[0]);
-		// 			return this->deserialise_field<[:std::meta::type_of(field):]>(wl_type);
-		// 		}()...};
-		// }(std::make_index_sequence<fields.size()> {});
 	}
 
-	void parse_message() {
+	void parse_message(std::vector<std::uint8_t> message) {
 		Header header;
-		std::memcpy(&header, this->message.data(), sizeof(Header));
+		std::memcpy(&header, message.data(), sizeof(Header));
 		std::println("Object ID: {}", header.object_id);
 
 		Interface& object = this->objects.at(header.object_id);
@@ -135,7 +127,7 @@ struct Client {
 					// but this is something I want to come back to
 					if (header.opcode == i) {
 						using Alternative = std::variant_alternative_t<i, typename T::Request>;
-						auto alternative = deserialise_struct<Alternative>();
+						auto alternative = deserialise_struct<Alternative>(std::move(message));
 						interface.handle(alternative);
 						return;
 					}
@@ -231,17 +223,18 @@ class Server {
 	 *  32 bit    | 16 bit | 16 bit                    | Message Size minus 64 bits
 	 */
 	void try_listen() {
+		std::vector<int> disconnected_fds = {};
+
 		for (auto& client : this->clients) {
-			std::uint8_t buffer[64]; // (Remember, this is bytes)
+			std::uint8_t buffer[128]; // (Remember, this is bytes)
 
 			while (true) {
-				std::uint16_t to_read = std::min<std::uint16_t>(client.bytes_needed, sizeof(buffer));
-				int bytes_read = recv(client.fd, &buffer[0], to_read, 0);
+				int bytes_read = recv(client.fd, &buffer[0], sizeof(buffer), 0);
 
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
 					std::println("Client disconnected");
-					this->remove_client(client.fd);
+					disconnected_fds.push_back(client.fd);
 					break;
 				} else if (bytes_read == -1) {
 					if (errno == EWOULDBLOCK) {
@@ -253,39 +246,28 @@ class Server {
 				}
 
 				std::println("Read {} bytes", bytes_read);
-				client.bytes_needed -= bytes_read;
-				client.message.insert(client.message.end(), buffer, buffer + bytes_read);
+				client.data.insert(client.data.end(), buffer, buffer + bytes_read);
 
-				/*
-				 * The listener works in two modes - reading the header, or the rest of the body
-				 * It is in header mode, until 48 bits (6 bytes) are read. At that point, it
-				 * reads how many bytes the entire message is from the last 2 bytes, and then
-				 * swaps to reading the rest of the body. Once those target bytes are met, the
-				 * message should be complete, so it can be parsed and it can all restart.
-				 * Of course, this is per client
-				 */
-				if (client.bytes_needed == 0) {
-					std::println("No more bytes need to be read, target reached");
-					if (client.reading_header) {
-						std::println("Reading header");
-						// Read the Message size (so 6 bytes in), to get the opcode + argument size
-						// I would like to be explictly be 0 copy, but i can't find how to do such without UB
-						std::uint16_t payload_size;
-						std::memcpy(&payload_size, client.message.data() + 6, sizeof(std::uint16_t));
-						client.bytes_needed = payload_size + client.bytes_needed; // bytes_needed may be negative, if we read more than we needed, hence we add it on
-						// Discount the header size from the total message size, as payload_size includes the header size, and we've already read that
-						client.bytes_needed -= HEADER_SIZE;
-						goto parse_message; // I will change the logic later, uncry your tears
+				// If the header exists, try to parse it
+				while (client.data.size() >= 8) {
+					std::uint16_t message_size;
+					std::memcpy(&message_size, client.data.data() + 6, sizeof(std::uint16_t));
+
+					// The message has been fully received
+					if (client.data.size() >= message_size) {
+						// TODO, find an elegant move, this is copy
+						std::vector<std::uint8_t> message(client.data.begin(), client.data.begin() + message_size);
+						client.data.erase(client.data.begin(), client.data.begin() + message_size);
+						client.parse_message(std::move(message));
 					} else {
-					parse_message:
-						std::println("Parsing message");
-						client.parse_message();
-						client.message.clear();
-						client.bytes_needed = HEADER_SIZE;
-					}
-					client.reading_header = !client.reading_header;
+                        break;
+                    }
 				}
 			}
+		}
+
+		for (auto fd : disconnected_fds) {
+            this->remove_client(fd);
 		}
 	}
 
