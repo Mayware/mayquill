@@ -41,6 +41,10 @@ import parser;
 // 	return target;
 // }
 
+std::string discriminate_clang(std::string_view content) {
+	return std::format("\n#ifndef __clang__\n{}\n#endif\n", content);
+}
+
 std::string pascal_to_snake(std::string target) {
 	target[0] = std::tolower(target[0]);
 	for (int i = 1; i < target.length(); i++) {
@@ -121,6 +125,7 @@ int main() {
 								   "    std::uint32_t client_id;\n",
 				struct_name);
 
+			// Write the custom enums the interface may define
 			for (auto& wlenum : interface.enums) {
 				content += std::format("\n    enum class {} {{\n", wlenum.name);
 
@@ -130,20 +135,22 @@ int main() {
 				content += "    };\n";
 			}
 
+			// Write the request structs
 			for (auto& request : interface.requests) {
-				content += std::format("\n    struct {} {{\n", request.name);
+				content += std::format("\n    struct {} {{", request.name);
 
 				for (auto& arg : request.arguments) {
-					// TODO, full arg parsing
-					content += std::format("#ifndef __clang__\n       {} {};\n#endif\n", arg.type, arg.name);
+					content += discriminate_clang(std::format("       {}", arg.type.annotation));
+                    content += std::format("       {} {};", arg.type.primitive, arg.name);
 				}
-				content += "    };\n";
+				content += "\n    };\n";
 			}
 
 			// Only generate the requests & handle method, if any requests actually exist
 			// If we didn't do this, we'd have an empty variant, which is invalid
 			// This will however mean some structs do not have requests / handles, and so will need to be handled
 			if (!interface.requests.empty()) {
+				// Write the request variant
 				content += "\n    using Request = std::variant<";
 
 				for (std::size_t i = 0; i < interface.requests.size(); ++i) {
@@ -156,7 +163,24 @@ int main() {
 				content += ">;\n"
 						   "    void handle(Request request); // Will be overidden by downstream user\n";
 			}
-			content += "};\n\n";
+
+			// Generate events
+			for (auto& event : interface.events) {
+				// Remember that events have no return type
+				content += std::format("\n\n    void {}(", pascal_to_snake(event.name));
+				for (std::size_t i = 0; i < event.arguments.size(); ++i) {
+					auto& argument = event.arguments[i];
+					content += discriminate_clang(std::format("        {}", argument.type.annotation));
+                    content += std::format("        {} {}", argument.type.primitive, pascal_to_snake(argument.name));
+					if (i == event.arguments.size() - 1) {
+						continue;
+					}
+					content += ", ";
+				}
+				content += "\n    );";
+			}
+
+			content += "\n};\n\n";
 
 			// Only generate a default unhandled handle method, if requests exist
 			if (!interface.requests.empty()) {

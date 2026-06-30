@@ -15,6 +15,7 @@ using namespace shared;
 
 export namespace mayquill {
 constexpr std::size_t HEADER_SIZE = 8;
+constexpr std::size_t MAX_FDS = 6;
 
 struct Header {
 	std::uint32_t object_id;
@@ -22,17 +23,13 @@ struct Header {
 	std::uint16_t size;
 };
 
-struct Message {
-    std::vector<std::uint8_t> data;
-    std::vector<int> fds;
-};
-
 struct Client {
 	std::uint64_t id;
 
 	int fd;
 	std::unordered_map<std::uint32_t, Interface> objects;
-	std::vector<Message> messages;
+	std::vector<std::uint8_t> data;
+	std::vector<int> fds;
 
 	template<typename T>
 	T deserialise_field(WlType wl_type, std::vector<std::uint8_t>& message) {
@@ -42,30 +39,56 @@ struct Client {
 		case WlType::Object:
 		case WlType::NewId:
 		case WlType::Enum: {
-			std::uint32_t raw;
-			std::memcpy(&raw, message.data(), sizeof(raw));
-			message.erase(message.begin(), message.begin() + sizeof(raw));
-
 			T value;
-			assert(sizeof(std::uint32_t) == sizeof(T));
-			std::memcpy(&value, &raw, sizeof(raw));
+			std::memcpy(&value, message.data(), sizeof(value));
+			message.erase(message.begin(), message.begin() + sizeof(value));
 			return value;
 		}
 
 		case WlType::Fixed: {
-			assert(false && "Fixed handling not implemented");
+			std::int32_t raw;
+			std::memcpy(&raw, message.data(), sizeof(raw));
+			message.erase(message.begin(), message.begin() + sizeof(raw));
+
+			// Divide by 2^8, to get the binary point leftwards 8 places
+			T value = static_cast<T>(raw) / 256.0;
+			return value;
 		}
 
 		case WlType::Fd: {
-			assert(false && "Fd handling not implemented");
+			assert(!this->fds.empty() && "Expected an FD, but vector was empty");
+			T value;
+			std::memcpy(&value, &fds.front(), sizeof(T));
+			this->fds.erase(this->fds.begin());
+			// No need to consume byte stream, as FDs are purely ancillary data
+			// This also prevented us from having a separate Vec<Messages>, because
+			// with no byte marker, we're unable to deliminate between which message
+			// an FD belongs to
+			return value;
 		}
 
 		case WlType::String: {
-			assert(false && "String handling not implemented");
+			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit, plus a null terminator at the end (included in byte count)
+			std::uint32_t count;
+			std::memcpy(&count, message.data(), sizeof(count));
+			message.erase(message.begin(), message.begin() + sizeof(count));
+			T value(message.begin(), message.begin() + (count - 1));
+
+			// Round the count up to the nearest 4
+			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
+			return value;
 		}
 
 		case WlType::Array: {
-			assert(false && "Array handling not implemented");
+			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit
+			std::uint32_t count;
+			std::memcpy(&count, message.data(), sizeof(count));
+			message.erase(message.begin(), message.begin() + sizeof(count));
+			T value(message.begin(), message.begin() + count);
+
+			// Round the count up to the nearest 4
+			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
+			return value;
 		}
 		}
 		throw std::invalid_argument("Invalid WlType");
@@ -82,7 +105,7 @@ struct Client {
 			std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
 
 		// Precompute the WlType tags in another lambda, rather directly in the Return T lambda / code part.
-        // We need to do this in a separate lambda (i.e. this), because extract must be consteval, which is not what our next lambda is.
+		// We need to do this in a separate lambda (i.e. this), because extract must be consteval, which is not what our next lambda is.
 		static constexpr auto wl_types = []() {
 			std::array<WlType, fields.size()> array {};
 			template for (constexpr auto i : std::views::iota(0uz, fields.size())) {
@@ -208,6 +231,7 @@ class Server {
 				.fd = fd,
 			};
 
+			// Add default display object
 			client.objects.emplace(1, WlDisplay {
 										  .object_id = 1,
 										  .client_id = 1, // TODO this is wrong
@@ -229,7 +253,19 @@ class Server {
 			std::uint8_t buffer[128]; // (Remember, this is bytes)
 
 			while (true) {
-				int bytes_read = recv(client.fd, &buffer[0], sizeof(buffer), 0);
+				// int bytes_read = recv(client.fd, &buffer[0], sizeof(buffer), 0);
+				alignas(msghdr) char control_buffer[CMSG_SPACE(sizeof(int) * MAX_FDS)] = {};
+				iovec io_vector = {
+					.iov_base = buffer,
+					.iov_len = sizeof(buffer),
+				};
+				msghdr message_header {
+					.msg_iov = &io_vector,
+					.msg_iovlen = 1,
+					.msg_control = control_buffer,
+					.msg_controllen = sizeof(control_buffer),
+				};
+				int bytes_read = recvmsg(client.fd, &message_header, 0);
 
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
@@ -248,6 +284,20 @@ class Server {
 				std::println("Read {} bytes", bytes_read);
 				client.data.insert(client.data.end(), buffer, buffer + bytes_read);
 
+				// The control messages are a packed list (uneven stride though, hence why we use cmsg_nexthdr, it reads the len from the control message)
+				// https://docs.huihoo.com/doxygen/linux/kernel/3.7/structcmsghdr.html, after that definition, it's the arbitrary payload
+				for (cmsghdr* control_message = CMSG_FIRSTHDR(&message_header);
+					control_message != nullptr;
+					control_message = CMSG_NXTHDR(&message_header, control_message)) {
+					if (control_message->cmsg_level == SOL_SOCKET && control_message->cmsg_type == SCM_RIGHTS) {
+						std::size_t number_fds = (control_message->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+                        // CMSG_DATA just gives the first byte of the payload, which should be a packed int array of the fd ids
+						int* received_fds = reinterpret_cast<int*>(CMSG_DATA(control_message));
+						client.fds.insert(client.fds.end(), received_fds, received_fds + number_fds);
+						std::println("Received {} fds", number_fds);
+					}
+				}
+
 				// If the header exists, try to parse it
 				while (client.data.size() >= 8) {
 					std::uint16_t message_size;
@@ -260,14 +310,14 @@ class Server {
 						client.data.erase(client.data.begin(), client.data.begin() + message_size);
 						client.parse_message(std::move(message));
 					} else {
-                        break;
-                    }
+						break;
+					}
 				}
 			}
 		}
 
 		for (auto fd : disconnected_fds) {
-            this->remove_client(fd);
+			this->remove_client(fd);
 		}
 	}
 

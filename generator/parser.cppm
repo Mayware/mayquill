@@ -14,9 +14,14 @@ struct Description {
 	std::optional<std::string> full;
 };
 
+struct Type {
+	std::string annotation;
+	std::string primitive; // the name is a lie, but you get it
+};
+
 struct Argument {
 	std::string name;
-	std::string type;
+	Type type;
 	Description description;
 	std::optional<std::string> interface_name;
 	std::optional<std::string> enum_name;
@@ -87,11 +92,11 @@ std::string snake_to_pascal(std::string target) {
  *  object     : 32 bits
  *  new_id     : 32 bits
  *  string     : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits), \0 terminator
- *  array      : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits
+ *  array      : 32 bits integer length prefix, contents (n bits, padded to the nearest 32 bits)
  *  fd         : 0 bits, stored in ancillary data of the message
  *  enum       : 32 bits integer, accompanied alongside the main type of int / uint
  */
-std::string convert_type(const pugi::xml_node& node, std::vector<std::string>& required_interfaces) {
+Type convert_type(const pugi::xml_node& node, std::vector<std::string>& required_interfaces) {
 	std::string_view type = node.attribute("type").as_string();
 
 	// We just return the enum class directory, no need to worry about further types
@@ -110,25 +115,25 @@ std::string convert_type(const pugi::xml_node& node, std::vector<std::string>& r
 		} else {
 			enum_str = snake_to_pascal(enum_str);
 		}
-		return "[[=WlType::Enum]] " + enum_str + "Enum";
+		return {"[[=WlType::Enum]]", enum_str + "Enum"};
 	}
 
 	if (type == "int") {
-		return "[[=WlType::Int]] std::int32_t";
+		return {"[[=WlType::Int]]", "std::int32_t"};
 	} else if (type == "uint") {
-		return "[[=WlType::Uint]] std::uint32_t";
+		return {"[[=WlType::Uint]]", "std::uint32_t"};
 	} else if (type == "fixed") {
-		return "[[=WlType::Fixed]] std::int32_t";
+		return {"[[=WlType::Fixed]]", "std::float64_t"}; // Float64 has a higher precision and range, than wayland fixed
 	} else if (type == "object") {
-		return "[[=WlType::Object]] std::uint32_t";
+		return {"[[=WlType::Object]]", "std::uint32_t"};
 	} else if (type == "new_id") {
-		return "[[=WlType::NewId]] std::uint32_t";
+		return {"[[=WlType::NewId]]", "std::uint32_t"};
 	} else if (type == "string") {
-		return "[[=WlType::String]] std::string";
+		return {"[[=WlType::String]]", "std::string"};
 	} else if (type == "array") {
-		return "[[=WlType::Array]] void*";
+		return {"[[=WlType::Array]]", "std::vector<std::uint8_t>"};
 	} else if (type == "fd") {
-		return "[[=WlType::Fd]] int";
+		return {"[[=WlType::Fd]]", "int"};
 	}
 
 	throw std::invalid_argument(
