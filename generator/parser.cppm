@@ -123,7 +123,7 @@ Type convert_type(const pugi::xml_node& node, std::vector<std::string>& required
 	} else if (type == "uint") {
 		return {"[[=WlType::Uint]]", "std::uint32_t"};
 	} else if (type == "fixed") {
-		return {"[[=WlType::Fixed]]", "std::float64_t"}; // Float64 has a higher precision and range, than wayland fixed
+		return {"[[=WlType::Fixed]]", "double"}; // std::float64_t equiv, but clang doesn't support it yet
 	} else if (type == "object") {
 		return {"[[=WlType::Object]]", "std::uint32_t"};
 	} else if (type == "new_id") {
@@ -198,9 +198,9 @@ std::int32_t get_entry_value(const pugi::xml_node& node) {
 	return std::stoi(node.attribute("value").as_string(), nullptr, 0);
 }
 
-Declaration get_declaration(const pugi::xml_node& node, std::vector<std::string>& required_interfaces) {
+Declaration get_declaration(const pugi::xml_node& node, std::vector<std::string>& required_interfaces, bool is_request) {
 	Declaration declaration = Declaration {
-		.name = get_pascal_name(node),
+		.name = is_request ? get_pascal_name(node) : get_name(node),
 		.description = get_description(node.child("description")),
 		.since = get_since(node),
 		.is_destructor = get_destructor(node),
@@ -272,10 +272,10 @@ std::vector<Protocol> get_protocols() {
 				};
 
 				for (pugi::xml_node node : node.children("request")) {
-					interface.requests.push_back(get_declaration(node, interface.required_interfaces));
+					interface.requests.push_back(get_declaration(node, interface.required_interfaces, true));
 				}
 				for (pugi::xml_node node : node.children("event")) {
-					interface.events.push_back(get_declaration(node, interface.required_interfaces));
+					interface.events.push_back(get_declaration(node, interface.required_interfaces, false));
 				}
 				for (pugi::xml_node node : node.children("enum")) {
 					interface.enums.push_back(get_enum(node));

@@ -17,12 +17,6 @@ export namespace mayquill {
 constexpr std::size_t HEADER_SIZE = 8;
 constexpr std::size_t MAX_FDS = 6;
 
-struct Header {
-	std::uint32_t object_id;
-	std::uint16_t opcode;
-	std::uint16_t size;
-};
-
 struct Client {
 	std::uint64_t id;
 
@@ -31,21 +25,18 @@ struct Client {
 	std::vector<std::uint8_t> data;
 	std::vector<int> fds;
 
-	template<typename T>
-	T deserialise_field(WlType wl_type, std::vector<std::uint8_t>& message) {
-		switch (wl_type) {
-		case WlType::Int:
-		case WlType::Uint:
-		case WlType::Object:
-		case WlType::NewId:
-		case WlType::Enum: {
+	template<WlType Wl, typename T>
+	T deserialise_field(std::vector<std::uint8_t>& message) {
+		if constexpr (Wl == WlType::Int ||
+					  Wl == WlType::Uint ||
+					  Wl == WlType::Object ||
+					  Wl == WlType::NewId ||
+					  Wl == WlType::Enum) {
 			T value;
 			std::memcpy(&value, message.data(), sizeof(value));
 			message.erase(message.begin(), message.begin() + sizeof(value));
 			return value;
-		}
-
-		case WlType::Fixed: {
+		} else if constexpr (Wl == WlType::Fixed) {
 			std::int32_t raw;
 			std::memcpy(&raw, message.data(), sizeof(raw));
 			message.erase(message.begin(), message.begin() + sizeof(raw));
@@ -53,9 +44,7 @@ struct Client {
 			// Divide by 2^8, to get the binary point leftwards 8 places
 			T value = static_cast<T>(raw) / 256.0;
 			return value;
-		}
-
-		case WlType::Fd: {
+		} else if constexpr (Wl == WlType::Fd) {
 			assert(!this->fds.empty() && "Expected an FD, but vector was empty");
 			T value;
 			std::memcpy(&value, &fds.front(), sizeof(T));
@@ -65,9 +54,7 @@ struct Client {
 			// with no byte marker, we're unable to deliminate between which message
 			// an FD belongs to
 			return value;
-		}
-
-		case WlType::String: {
+		} else if constexpr (Wl == WlType::String) {
 			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit, plus a null terminator at the end (included in byte count)
 			std::uint32_t count;
 			std::memcpy(&count, message.data(), sizeof(count));
@@ -77,9 +64,7 @@ struct Client {
 			// Round the count up to the nearest 4
 			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
 			return value;
-		}
-
-		case WlType::Array: {
+		} else if constexpr (Wl == WlType::Array) {
 			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit
 			std::uint32_t count;
 			std::memcpy(&count, message.data(), sizeof(count));
@@ -89,9 +74,9 @@ struct Client {
 			// Round the count up to the nearest 4
 			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
 			return value;
+		} else {
+			static_assert(false, "Invalid WlType passed");
 		}
-		}
-		throw std::invalid_argument("Invalid WlType");
 	}
 
 	// T is the GeneratedModule::Request type
@@ -101,26 +86,16 @@ struct Client {
 		message.erase(message.begin(), message.begin() + sizeof(Header));
 
 #ifndef __clang__
-		static constexpr auto fields = std::define_static_array(
-			std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
-
-		// Precompute the WlType tags in another lambda, rather directly in the Return T lambda / code part.
-		// We need to do this in a separate lambda (i.e. this), because extract must be consteval, which is not what our next lambda is.
-		static constexpr auto wl_types = []() {
-			std::array<WlType, fields.size()> array {};
-			template for (constexpr auto i : std::views::iota(0uz, fields.size())) {
-				array[i] = std::meta::extract<WlType>(std::meta::annotations_of(fields[i])[0]);
-			}
-			return array;
-		}();
+		static constexpr auto fields = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
+		static constexpr auto wl_types = get_wl_types(fields);
 
 		// The parameter pack (and hence, outer lambda) approach is required for aggregate intiialisation because
 		// ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
 		// of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
 		// type between the n, but this defines it as they must all be of size_t.
-		return [this, &message]<std::size_t... n>(std::index_sequence<n...>) -> T {
+		return [this, &message]<std::size_t... N>(std::index_sequence<N...>) -> T {
 			return T {
-				this->deserialise_field<typename[:std::meta::type_of(fields[n]):]>(wl_types[n], message)...};
+				this->deserialise_field<wl_types[N], typename[:std::meta::type_of(fields[N]):]>(message)...};
 		}(std::make_index_sequence<fields.size()> {});
 #endif
 	}
@@ -231,10 +206,11 @@ class Server {
 				.fd = fd,
 			};
 
-			// Add default display object
+			// Add default display object TODO THIS CLIENT ID LOGIC IS WRONG, IF A CLIENT IS REMOVED
 			client.objects.emplace(1, WlDisplay {
 										  .object_id = 1,
-										  .client_id = 1, // TODO this is wrong
+										  .client_id = client.id,
+										  .fd = fd,
 									  });
 
 			this->clients.push_back(client);
@@ -250,11 +226,14 @@ class Server {
 		std::vector<int> disconnected_fds = {};
 
 		for (auto& client : this->clients) {
-			std::uint8_t buffer[128]; // (Remember, this is bytes)
+			std::uint8_t buffer[128]; // (Remember, this is bytes) TODO 0 INIT
 
 			while (true) {
+				// Useful link: https://stackoverflow.com/questions/32593697/understanding-the-msghdr-structure-from-sys-socket-h
 				// int bytes_read = recv(client.fd, &buffer[0], sizeof(buffer), 0);
-				alignas(msghdr) char control_buffer[CMSG_SPACE(sizeof(int) * MAX_FDS)] = {};
+				// c means control, Reserve enough space for the max amount of FDs we can read. CMSG_SPACE simply adds the header requriements, and padding; we provide it the payload size, so we get the total
+				// We align as a cmsghdr, as we declare it as a char, but it will actually be interpreted as a cmsghdr, so it needs to follow the alignment requirements of it.
+				alignas(cmsghdr) char control_buffer[128];
 				iovec io_vector = {
 					.iov_base = buffer,
 					.iov_len = sizeof(buffer),
@@ -281,18 +260,28 @@ class Server {
 					}
 				}
 
+				// Check if the ancilliary data fit. We don't want to wait to read it in the next loop, because potentially,
+				// it could be part of this message that will be processed in this loop.
+				if (message_header.msg_flags & MSG_CTRUNC) {
+					throw std::runtime_error("Control message was truncated, couldn't fit into buffer");
+				}
+
 				std::println("Read {} bytes", bytes_read);
 				client.data.insert(client.data.end(), buffer, buffer + bytes_read);
 
-				// The control messages are a packed list (uneven stride though, hence why we use cmsg_nexthdr, it reads the len from the control message)
-				// https://docs.huihoo.com/doxygen/linux/kernel/3.7/structcmsghdr.html, after that definition, it's the arbitrary payload
-				for (cmsghdr* control_message = CMSG_FIRSTHDR(&message_header);
-					control_message != nullptr;
-					control_message = CMSG_NXTHDR(&message_header, control_message)) {
-					if (control_message->cmsg_level == SOL_SOCKET && control_message->cmsg_type == SCM_RIGHTS) {
-						std::size_t number_fds = (control_message->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-                        // CMSG_DATA just gives the first byte of the payload, which should be a packed int array of the fd ids
-						int* received_fds = reinterpret_cast<int*>(CMSG_DATA(control_message));
+				// PBUG: I have avoided macros in this, because I didn't understand how there could be alignment between the
+				// cmsghdr and the payload, given the payload is just intgers. Hence, I have done it manually.
+				// cmsgs (control headers) are roughly the header data -> padding -> payload data -> padding
+				// The control messages are a packed list (uneven stride though, hence why we use cmsg_nexthdr, it readso the len from the control message)
+				// Useful macro docs: https://man.archlinux.org/man/core/man-pages/CMSG_LEN.3
+				for (cmsghdr* cmsg = CMSG_FIRSTHDR(&message_header); cmsg != nullptr; cmsg = CMSG_NXTHDR(&message_header, cmsg)) {
+					// Check this cmsg will contain data about scm_rights, SOL_SOCKET is just the layer SCM_RIGHTS is on
+					if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+						// The cmsg_len does NOT include the size of the trailing bytes (required for alignment), just the cmsghdr + payload
+						// The CMSG_LEN macro gives you the size of the header + "alignment"
+						std::size_t number_fds = (cmsg->cmsg_len - sizeof(cmsghdr)) / sizeof(int);
+						// CMSG_DATA just gives the first byte of the payload, which should be a packed int array of the fd ids
+						int* received_fds = reinterpret_cast<int*>(cmsg + 1); // Skip the header, pointer arithemtic will actually do cmsg + sizeof(cmsghdr) in human logic
 						client.fds.insert(client.fds.end(), received_fds, received_fds + number_fds);
 						std::println("Received {} fds", number_fds);
 					}

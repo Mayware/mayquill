@@ -122,7 +122,8 @@ int main() {
 			content += std::format("export struct {} {{\n"
 								   "    // These are the only runtime mutable states\n"
 								   "    std::uint32_t object_id;\n"
-								   "    std::uint32_t client_id;\n",
+								   "    std::uint64_t client_id;\n"
+								   "    int fd;\n",
 				struct_name);
 
 			// Write the custom enums the interface may define
@@ -141,7 +142,7 @@ int main() {
 
 				for (auto& arg : request.arguments) {
 					content += discriminate_clang(std::format("       {}", arg.type.annotation));
-                    content += std::format("       {} {};", arg.type.primitive, arg.name);
+					content += std::format("       {} {};", arg.type.primitive, arg.name);
 				}
 				content += "\n    };\n";
 			}
@@ -165,19 +166,29 @@ int main() {
 			}
 
 			// Generate events
-			for (auto& event : interface.events) {
+			for (std::size_t iter = 0; iter < interface.events.size(); ++iter) {
+				auto& event = interface.events[iter];
 				// Remember that events have no return type
-				content += std::format("\n\n    void {}(", pascal_to_snake(event.name));
+				content += std::format("\n\n    void {}(", event.name);
 				for (std::size_t i = 0; i < event.arguments.size(); ++i) {
 					auto& argument = event.arguments[i];
 					content += discriminate_clang(std::format("        {}", argument.type.annotation));
-                    content += std::format("        {} {}", argument.type.primitive, pascal_to_snake(argument.name));
+					content += std::format("        {} {}", argument.type.primitive, argument.name);
 					if (i == event.arguments.size() - 1) {
 						continue;
 					}
 					content += ", ";
 				}
-				content += "\n    );";
+				content += "\n    ) {\n";
+
+				// Parameters can shadow the function name, so use full type specifier
+				auto definition = std::format("       serialise<^^{}::{}, {}>(this->fd, this->object_id ", struct_name, event.name, iter);
+                for (auto& argument : event.arguments) {
+                    definition += std::format(", {}", argument.name);
+                }
+                definition += ");";
+                content += discriminate_clang(definition);
+				content += "    }\n";
 			}
 
 			content += "\n};\n\n";
