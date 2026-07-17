@@ -1,11 +1,12 @@
 module;
-export module mayquill.client;
+#include <cassert>
+export module mayquill:client;
 import std;
-import mayquill.definitions;
-import mayquill.generated;
+import :definitions;
+import :interface;
 
-namespace mayquill {
-export struct Client {
+export namespace mayquill {
+struct Client {
 	int fd;
 	std::vector<std::optional<Interface>> objects; // Index is the objectid, 0th index is wasted
 
@@ -21,8 +22,8 @@ export struct Client {
 			objects.resize(id + 1);
 		}
 		objects[id] = T {
-			.id = id,
-			.client = this};
+			.client = this,
+			.id = id};
 	}
 
 	template<WlType Wl, typename T>
@@ -137,4 +138,4 @@ export struct Client {
 			object);
 	}
 };
-}; // namespace client
+}; // namespace mayquill

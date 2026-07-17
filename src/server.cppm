@@ -4,13 +4,13 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-export module mayquill.server;
-import wayland.wl_display;
-import mayquill.definitions;
-import mayquill.client;
+export module mayquill:server;
+import :wayland.wl_display;
+import :definitions;
+import :client;
 
 export namespace mayquill {
-export class Server {
+class Server {
   private:
 	int fd;
 	std::vector<std::unique_ptr<Client>> clients;
@@ -19,7 +19,7 @@ export class Server {
 	void bind_socket() {
 		std::string directory;
 		{
-			auto runtime = util::get_env("XDG_RUNTIME_DIR");
+			auto runtime = get_env("XDG_RUNTIME_DIR");
 			directory = runtime ? *runtime : "/run/user/1000";
 		}
 

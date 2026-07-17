@@ -2,9 +2,9 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-export module mayquill.serialiser;
+export module mayquill:serialiser;
 import std;
-import mayquill.definitions;
+import :definitions;
 
 export namespace mayquill {
 ssize_t send_message(

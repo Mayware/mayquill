@@ -63,24 +63,40 @@ void add_header(std::string& target) {
 }
 
 void write_file(std::string name, std::string content) {
-	std::ofstream file(std::format("build/generated-modules/{}.cppm", pascal_to_snake(name)));
+	std::ofstream file(std::format("build/generated-modules/{}", pascal_to_snake(name)));
 	std::print(file, "{}", content);
 }
 
 int main() {
 	auto protocols = parser::get_protocols();
 
-	// Write the MayQuill primary interface
+	// Write the primary mayquill interface
 	{
 		std::string content = "";
 		add_header(content);
-		content += "export module mayquill.generated;\n"
-				   "import std;\n";
+		content += "export module mayquill;\n"
+				   "export import :server;\n\n";
+
+		for (auto& protocol : protocols) {
+			for (auto& interface : protocol.interfaces) {
+				content += std::format("export import :{}.{};\n", protocol.name, interface.name);
+			}
+		}
+
+		write_file("mayquill.cppm", std::move(content));
+	}
+
+	// Write the interface, a variant of all the objects
+	{
+		std::string content = "";
+		add_header(content);
+		content += "export module mayquill:interface;\n"
+				   "import std;\n\n";
 
 		// Write the imports
 		for (auto& protocol : protocols) {
 			for (auto& interface : protocol.interfaces) {
-				content += std::format("import {}.{};\n", protocol.name, interface.name);
+				content += std::format("import :{}.{};\n", protocol.name, interface.name);
 			}
 		}
 
@@ -97,112 +113,147 @@ int main() {
 			}
 		}
 		content += ">;\n};";
-		write_file("mayquill", std::move(content));
+		write_file("interface.cppm", std::move(content));
 	}
 
 	// Write the individual interfaces
 	for (auto& protocol : protocols) {
 		for (auto& interface : protocol.interfaces) {
 			std::string struct_name = parser::snake_to_pascal(interface.name);
-			std::string content = "";
-			add_header(content);
-			content += std::format(
-				// "module;\n"
-				"export module {}.{};\n"
-				"import std;\n"
-				"import mayquill.definitions;\n"
-				"import mayquill.client;\n",
-				protocol.name, interface.name);
 
-			for (auto& required_interface : interface.required_interfaces) {
-				content += std::format("import {}.{};\n", protocol.name, required_interface);
-			}
-
-			// content += std::format("export namespace {} {{\n", protocol.name);
-			content += std::format("export struct {} {{\n"
-								   "    Client* client;\n"
-								   "    std::uint32_t id;\n",
-				struct_name);
-
-			// Write the custom enums the interface may define
-			for (auto& wlenum : interface.enums) {
-				content += std::format("\n    enum class {} {{\n", wlenum.name);
-
-				for (auto& entry : wlenum.entries) {
-					content += std::format("        {} = {},\n", entry.name, entry.value);
-				}
-				content += "    };\n";
-			}
-
-			// Write the request structs
-			for (auto& request : interface.requests) {
-				content += discriminate_clang(std::format("   {}", request.annotation));
-				content += std::format("    struct {} {{", request.name);
-
-				for (auto& arg : request.arguments) {
-					content += discriminate_clang(std::format("       {}", arg.annotation));
-					content += std::format("       {} {};", arg.type, arg.name);
-				}
-				content += "\n    };\n";
-			}
-
-			// Only generate the requests & handle method, if any requests actually exist
-			// If we didn't do this, we'd have an empty variant, which is invalid
-			// This will however mean some structs do not have requests / handles, and so will need to be handled
-			if (!interface.requests.empty()) {
-				// Write the request variant
-				content += "\n    using Request = std::variant<";
-
-				for (std::size_t i = 0; i < interface.requests.size(); ++i) {
-					content += interface.requests[i].name;
-					if (i == interface.requests.size() - 1) {
-						continue;
-					}
-					content += ", ";
-				}
-				content += ">;\n"
-						   "    void handle(Request request); // Will be overidden by downstream user\n";
-			}
-
-			// Generate events
-			for (std::size_t iter = 0; iter < interface.events.size(); ++iter) {
-				auto& event = interface.events[iter];
-				// Remember that events have no return type
-				content += std::format("\n\n    void {}(", event.name);
-				for (std::size_t i = 0; i < event.arguments.size(); ++i) {
-					auto& argument = event.arguments[i];
-					content += discriminate_clang(std::format("        {}", argument.annotation));
-					content += std::format("        {} {}", argument.type, argument.name);
-					if (i == event.arguments.size() - 1) {
-						continue;
-					}
-					content += ", ";
-				}
-				content += "\n    ) {\n";
-
-				// Parameters can shadow the function name, so use full type specifier
-				auto definition = std::format("       serialise<^^{}::{}, {}>(client->fd, this->id ", struct_name, event.name, iter);
-				for (auto& argument : event.arguments) {
-					definition += std::format(", {}", argument.name);
-				}
-				definition += ");";
-				content += discriminate_clang(definition);
-				content += "    }\n";
-			}
-
-			content += "\n};\n\n";
-
-			// Only generate a default unhandled handle method, if requests exist
-			if (!interface.requests.empty()) {
+			{
+				std::string content = "";
+				add_header(content);
 				content += std::format(
-					"// Default implementation, linker will prefer the implementation you provide, since we've marked this one as weak (absolutely ratioed)\n"
-					"[[gnu::weak]]\n"
-					"void {}::handle(Request request) {{\n"
-					"    std::println(\"{}::handle(Request request) is currently unimplemented, request will be ignored\");\n"
-					"}}\n",
-					struct_name, struct_name, struct_name);
+					// "module;\n"
+					"export module mayquill:{}.{};\n"
+					"import std;\n"
+					"import :definitions;\n"
+					"import :client_forward;\n\n",
+					protocol.name, interface.name);
+
+				for (auto& required_interface : interface.required_interfaces) {
+					content += std::format("import :{}.{};\n", protocol.name, required_interface);
+				}
+
+				content += "export namespace mayquill {\n";
+				content += std::format("struct {} {{\n"
+									   "    Client* client;\n"
+									   "    std::uint32_t id;\n",
+					struct_name);
+
+				// Write the custom enums the interface may define
+				for (auto& wlenum : interface.enums) {
+					content += std::format("\n    enum class {} {{\n", wlenum.name);
+
+					for (auto& entry : wlenum.entries) {
+						content += std::format("        {} = {},\n", entry.name, entry.value);
+					}
+					content += "    };\n";
+				}
+
+				// Write the request structs
+				for (auto& request : interface.requests) {
+                    content += "   struct";
+					content += discriminate_clang(std::format("   {}", request.annotation));
+					content += std::format("    {} {{", request.name);
+
+					for (auto& arg : request.arguments) {
+						content += discriminate_clang(std::format("       {}", arg.annotation));
+						content += std::format("       {} {};", arg.type, arg.name);
+					}
+					content += "\n    };\n";
+				}
+
+				// Only generate the requests & handle method, if any requests actually exist
+				// If we didn't do this, we'd have an empty variant, which is invalid
+				// This will however mean some structs do not have requests / handles, and so will need to be handled
+				if (!interface.requests.empty()) {
+					// Write the request variant
+					content += "\n    using Request = std::variant<";
+
+					for (std::size_t i = 0; i < interface.requests.size(); ++i) {
+						content += interface.requests[i].name;
+						if (i == interface.requests.size() - 1) {
+							continue;
+						}
+						content += ", ";
+					}
+					content += ">;\n"
+							   "    void handle(Request request); // Will be overidden by downstream user";
+				}
+
+				// Generate events
+				for (std::size_t iter = 0; iter < interface.events.size(); ++iter) {
+					auto& event = interface.events[iter];
+					// Remember that events have no return type
+					content += std::format("\n\n    void {}(", event.name);
+					for (std::size_t i = 0; i < event.arguments.size(); ++i) {
+						auto& argument = event.arguments[i];
+						content += discriminate_clang(std::format("        {}", argument.annotation));
+						content += std::format("        {} {}", argument.type, argument.name);
+						if (i == event.arguments.size() - 1) {
+							continue;
+						}
+						content += ", ";
+					}
+					if (event.arguments.size() > 0)
+						content += "\n    ";
+					content += ");\n";
+				}
+
+				content += "\n};\n};";
+				write_file(interface.name + ".cppm", std::move(content));
 			}
-			write_file(interface.name, std::move(content));
+
+			// Write the implementation file
+			{
+				std::string content = "";
+				add_header(content);
+				content += "module mayquill;\n"
+						   "import :serialiser;\n"
+						   "import :client;\n\n"
+						   "namespace mayquill {\n";
+
+				// Write event implementations
+				for (std::size_t iter = 0; iter < interface.events.size(); ++iter) {
+					auto& event = interface.events[iter];
+					content += std::format("void {}::{}(", struct_name, event.name);
+					for (std::size_t i = 0; i < event.arguments.size(); ++i) {
+						auto& argument = event.arguments[i];
+						content += std::format("{} {}", argument.type, argument.name);
+						if (i == event.arguments.size() - 1) {
+							continue;
+						}
+						content += ", ";
+					}
+					content += ") {";
+
+					// Parameters can shadow the function name, so use full type specifier
+					auto definition = std::format("    serialise<^^{}::{}, {}>(client->fd, this->id ", struct_name, event.name, iter);
+					for (auto& argument : event.arguments) {
+						definition += std::format(", {}", argument.name);
+					}
+					definition += ");";
+					content += discriminate_clang(definition);
+					content += "}\n\n";
+				}
+
+				// Only generate a default unhandled handle method, if requests exist
+				if (!interface.requests.empty()) {
+					content += std::format(
+						"// Default implementation, linker will prefer the implementation you provide, since we've marked this one as weak (absolutely ratioed)\n"
+						"[[gnu::weak]]\n"
+						"void {}::handle(Request request) {{\n"
+						"    std::println(\"{}::handle(Request request) is currently unimplemented, request will be ignored\");\n"
+						"}}\n",
+						struct_name, struct_name, struct_name);
+				}
+				content += "};";
+
+                // .cpp instead of .cppm as clang expects non-interface modules to not be called .cppm
+				write_file(interface.name + "_impl.cpp", std::move(content));
+			}
 		}
 	}
 }

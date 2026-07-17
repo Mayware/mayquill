@@ -1,4 +1,4 @@
-export module mayquill.definitions;
+export module mayquill:definitions;
 import std;
 
 export namespace mayquill {
