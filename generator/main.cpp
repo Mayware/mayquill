@@ -74,9 +74,8 @@ int main() {
 	{
 		std::string content = "";
 		add_header(content);
-		content += "export module mayquill:generated;\n"
-				   "import std;\n"
-				   "import shared;\n";
+		content += "export module mayquill.generated;\n"
+				   "import std;\n";
 
 		// Write the imports
 		for (auto& protocol : protocols) {
@@ -86,7 +85,8 @@ int main() {
 		}
 
 		// Write the using Interface
-		content += "\nusing Interface = std::variant<";
+		content += "\nnamespace mayquill {\n"
+				   "using Interface = std::variant<";
 		for (auto& protocol : protocols) {
 			for (std::size_t i = 0; i < protocol.interfaces.size(); ++i) {
 				content += parser::snake_to_pascal(protocol.interfaces[i].name);
@@ -96,7 +96,7 @@ int main() {
 				content += ", ";
 			}
 		}
-		content += ">;\n";
+		content += ">;\n};";
 		write_file("mayquill", std::move(content));
 	}
 
@@ -110,20 +110,18 @@ int main() {
 				// "module;\n"
 				"export module {}.{};\n"
 				"import std;\n"
-				"import shared;\n",
+				"import mayquill.definitions;\n"
+				"import mayquill.client;\n",
 				protocol.name, interface.name);
 
 			for (auto& required_interface : interface.required_interfaces) {
 				content += std::format("import {}.{};\n", protocol.name, required_interface);
 			}
-			content += "using namespace shared;\n\n";
 
 			// content += std::format("export namespace {} {{\n", protocol.name);
 			content += std::format("export struct {} {{\n"
-								   "    // These are the only runtime mutable states\n"
-								   "    std::uint32_t object_id;\n"
-								   "    std::uint64_t client_id;\n"
-								   "    int fd;\n",
+								   "    Client* client;\n"
+								   "    std::uint32_t id;\n",
 				struct_name);
 
 			// Write the custom enums the interface may define
@@ -138,11 +136,12 @@ int main() {
 
 			// Write the request structs
 			for (auto& request : interface.requests) {
-				content += std::format("\n    struct {} {{", request.name);
+				content += discriminate_clang(std::format("   {}", request.annotation));
+				content += std::format("    struct {} {{", request.name);
 
 				for (auto& arg : request.arguments) {
-					content += discriminate_clang(std::format("       {}", arg.type.annotation));
-					content += std::format("       {} {};", arg.type.primitive, arg.name);
+					content += discriminate_clang(std::format("       {}", arg.annotation));
+					content += std::format("       {} {};", arg.type, arg.name);
 				}
 				content += "\n    };\n";
 			}
@@ -172,8 +171,8 @@ int main() {
 				content += std::format("\n\n    void {}(", event.name);
 				for (std::size_t i = 0; i < event.arguments.size(); ++i) {
 					auto& argument = event.arguments[i];
-					content += discriminate_clang(std::format("        {}", argument.type.annotation));
-					content += std::format("        {} {}", argument.type.primitive, argument.name);
+					content += discriminate_clang(std::format("        {}", argument.annotation));
+					content += std::format("        {} {}", argument.type, argument.name);
 					if (i == event.arguments.size() - 1) {
 						continue;
 					}
@@ -182,12 +181,12 @@ int main() {
 				content += "\n    ) {\n";
 
 				// Parameters can shadow the function name, so use full type specifier
-				auto definition = std::format("       serialise<^^{}::{}, {}>(this->fd, this->object_id ", struct_name, event.name, iter);
-                for (auto& argument : event.arguments) {
-                    definition += std::format(", {}", argument.name);
-                }
-                definition += ");";
-                content += discriminate_clang(definition);
+				auto definition = std::format("       serialise<^^{}::{}, {}>(client->fd, this->id ", struct_name, event.name, iter);
+				for (auto& argument : event.arguments) {
+					definition += std::format(", {}", argument.name);
+				}
+				definition += ");";
+				content += discriminate_clang(definition);
 				content += "    }\n";
 			}
 

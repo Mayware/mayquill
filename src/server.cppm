@@ -4,146 +4,16 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-export module mayquill;
-import util;
-import shared;
+export module mayquill.server;
 import wayland.wl_display;
-
-export import :generated;
-
-using namespace shared;
+import mayquill.definitions;
+import mayquill.client;
 
 export namespace mayquill {
-constexpr std::size_t HEADER_SIZE = 8;
-constexpr std::size_t MAX_FDS = 6;
-
-struct Client {
-	std::uint64_t id;
-
-	int fd;
-	std::unordered_map<std::uint32_t, Interface> objects;
-	std::vector<std::uint8_t> data;
-	std::vector<int> fds;
-
-	template<WlType Wl, typename T>
-	T deserialise_field(std::vector<std::uint8_t>& message) {
-		if constexpr (Wl == WlType::Int ||
-					  Wl == WlType::Uint ||
-					  Wl == WlType::Object ||
-					  Wl == WlType::NewId ||
-					  Wl == WlType::Enum) {
-			T value;
-			std::memcpy(&value, message.data(), sizeof(value));
-			message.erase(message.begin(), message.begin() + sizeof(value));
-			return value;
-		} else if constexpr (Wl == WlType::Fixed) {
-			std::int32_t raw;
-			std::memcpy(&raw, message.data(), sizeof(raw));
-			message.erase(message.begin(), message.begin() + sizeof(raw));
-
-			// Divide by 2^8, to get the binary point leftwards 8 places
-			T value = static_cast<T>(raw) / 256.0;
-			return value;
-		} else if constexpr (Wl == WlType::Fd) {
-			assert(!this->fds.empty() && "Expected an FD, but vector was empty");
-			T value;
-			std::memcpy(&value, &fds.front(), sizeof(T));
-			this->fds.erase(this->fds.begin());
-			// No need to consume byte stream, as FDs are purely ancillary data
-			// This also prevented us from having a separate Vec<Messages>, because
-			// with no byte marker, we're unable to deliminate between which message
-			// an FD belongs to
-			return value;
-		} else if constexpr (Wl == WlType::String) {
-			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit, plus a null terminator at the end (included in byte count)
-			std::uint32_t count;
-			std::memcpy(&count, message.data(), sizeof(count));
-			message.erase(message.begin(), message.begin() + sizeof(count));
-			T value(message.begin(), message.begin() + (count - 1));
-
-			// Round the count up to the nearest 4
-			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
-			return value;
-		} else if constexpr (Wl == WlType::Array) {
-			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit
-			std::uint32_t count;
-			std::memcpy(&count, message.data(), sizeof(count));
-			message.erase(message.begin(), message.begin() + sizeof(count));
-			T value(message.begin(), message.begin() + count);
-
-			// Round the count up to the nearest 4
-			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
-			return value;
-		} else {
-			static_assert(false, "Invalid WlType passed");
-		}
-	}
-
-	// T is the GeneratedModule::Request type
-	template<typename T>
-	T deserialise_struct(std::vector<std::uint8_t> message) {
-		// Strip the header from the message, we have no more use for it
-		message.erase(message.begin(), message.begin() + sizeof(Header));
-
-#ifndef __clang__
-		static constexpr auto fields = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
-		static constexpr auto wl_types = get_wl_types(fields);
-
-		// The parameter pack (and hence, outer lambda) approach is required for aggregate intiialisation because
-		// ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
-		// of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
-		// type between the n, but this defines it as they must all be of size_t.
-		return [this, &message]<std::size_t... N>(std::index_sequence<N...>) -> T {
-			return T {
-				this->deserialise_field<wl_types[N], typename[:std::meta::type_of(fields[N]):]>(message)...};
-		}(std::make_index_sequence<fields.size()> {});
-#endif
-	}
-
-	void parse_message(std::vector<std::uint8_t> message) {
-		Header header;
-		std::memcpy(&header, message.data(), sizeof(Header));
-		std::println("Object ID: {}", header.object_id);
-
-		Interface& object = this->objects.at(header.object_id);
-
-		std::visit([&](auto& interface) {
-			// Get the actual type
-			using T = std::decay_t<decltype(interface)>;
-
-			// Check if the nested request type exists
-			// If it does, we'll parse the args accordingly
-			// If it doesn't, then there shouldn't be any args
-			if constexpr (requires { typename T::Request; }) {
-#ifndef __clang__
-				// Template for stamps out each iteration at compile time
-				// This is needed, as getting the variant at an index requires a comptime value
-				// Template for only supports range-based syntax, hence the iota
-				template for (constexpr auto i : std::views::iota(0uz, std::variant_size_v<typename T::Request>)) {
-					// I tried to find a way to do a jump table directly, but was unable to
-					// In reality, it will probably optimise to if statements since there are few cases
-					// but this is something I want to come back to
-					if (header.opcode == i) {
-						using Alternative = std::variant_alternative_t<i, typename T::Request>;
-						auto alternative = deserialise_struct<Alternative>(std::move(message));
-						interface.handle(alternative);
-						return;
-					}
-				}
-#endif
-				std::println("No opcode matched: {}", header.opcode);
-			}
-		},
-			object);
-	}
-};
-
-class Server {
-
+export class Server {
   private:
 	int fd;
-	util::IncCounter next_id;
-	std::vector<Client> clients;
+	std::vector<std::unique_ptr<Client>> clients;
 
   public:
 	void bind_socket() {
@@ -201,19 +71,10 @@ class Server {
 			}
 
 			// New client accepted
-			auto client = Client {
-				.id = this->next_id.next(),
-				.fd = fd,
-			};
-
-			// Add default display object TODO THIS CLIENT ID LOGIC IS WRONG, IF A CLIENT IS REMOVED
-			client.objects.emplace(1, WlDisplay {
-										  .object_id = 1,
-										  .client_id = client.id,
-										  .fd = fd,
-									  });
-
-			this->clients.push_back(client);
+			auto client = std::make_unique<Client>(fd);
+			// Add default display object
+			client->add_object<WlDisplay>(1);
+			this->clients.push_back(std::move(client));
 			std::println("Accepted a new client");
 		}
 	}
@@ -225,7 +86,8 @@ class Server {
 	void try_listen() {
 		std::vector<int> disconnected_fds = {};
 
-		for (auto& client : this->clients) {
+		for (auto& unique_client : this->clients) {
+			auto client = *unique_client;
 			std::uint8_t buffer[128]; // (Remember, this is bytes) TODO 0 INIT
 
 			while (true) {
@@ -312,7 +174,7 @@ class Server {
 
 	void remove_client(int fd) {
 		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
-			if (it->fd == fd) {
+			if ((*it)->fd == fd) {
 				this->clients.erase(it);
 				break;
 			}

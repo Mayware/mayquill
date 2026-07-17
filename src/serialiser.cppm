@@ -2,41 +2,11 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-export module shared;
+export module mayquill.serialiser;
 import std;
+import mayquill.definitions;
 
-namespace shared {
-export enum class WlType {
-	Int,
-	Uint,
-	Fixed,
-	Object,
-	NewId,
-	String,
-	Array,
-	Fd,
-	Enum
-};
-
-export struct Header {
-	std::uint32_t object_id;
-	std::uint16_t opcode;
-	std::uint16_t size;
-};
-
-#ifndef __clang__
-export consteval auto get_wl_types(std::span<const std::meta::info> fields) {
-	std::vector<WlType> wl_types(fields.size());
-
-	for (std::size_t i = 0; i < fields.size(); ++i) {
-		wl_types[i] = std::meta::extract<WlType>(
-			std::meta::annotations_of(fields[i])[0]);
-	}
-
-	return std::define_static_array(wl_types);
-}
-#endif
-
+export namespace mayquill {
 ssize_t send_message(
 	int fd,
 	const std::vector<std::uint8_t>& data) {
@@ -76,7 +46,7 @@ ssize_t send_message(
 	return sendmsg(fd, &message_header, 0);
 }
 
-export template<WlType Wl, typename T>
+template<WlType Wl, typename T>
 void serialise_field(std::vector<std::uint8_t>& message, std::vector<int>& fds, const T& value) {
 	if constexpr (
 		Wl == WlType::Int ||
@@ -123,7 +93,7 @@ void serialise_field(std::vector<std::uint8_t>& message, std::vector<int>& fds, 
 }
 
 #ifndef __clang__
-export template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>
+template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>
 void serialise(int fd, std::uint32_t object_id, const Args&... args) {
 	static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));
 	static constexpr auto wl_types = get_wl_types(parameters);
@@ -157,4 +127,4 @@ void serialise(int fd, std::uint32_t object_id, const Args&... args) {
 }
 #endif
 
-} // namespace shared
+} // namespace mayquill

@@ -14,14 +14,10 @@ struct Description {
 	std::optional<std::string> full;
 };
 
-struct Type {
-	std::string annotation;
-	std::string primitive; // the name is a lie, but you get it
-};
-
 struct Argument {
 	std::string name;
-	Type type;
+	std::string annotation;
+	std::string type;
 	Description description;
 	std::optional<std::string> interface_name;
 	std::optional<std::string> enum_name;
@@ -30,10 +26,10 @@ struct Argument {
 
 struct Declaration {
 	std::string name;
+	std::string annotation;
 	Description description;
 	std::vector<Argument> arguments;
 	std::uint32_t since;
-	bool is_destructor;
 };
 
 struct Entry {
@@ -96,7 +92,7 @@ std::string snake_to_pascal(std::string target) {
  *  fd         : 0 bits, stored in ancillary data of the message
  *  enum       : 32 bits integer, accompanied alongside the main type of int / uint
  */
-Type convert_type(const pugi::xml_node& node, std::vector<std::string>& required_interfaces) {
+std::tuple<std::string, std::string> convert_type(const pugi::xml_node& node, std::vector<std::string>& required_interfaces) {
 	std::string_view type = node.attribute("type").as_string();
 
 	// We just return the enum class directory, no need to worry about further types
@@ -199,17 +195,20 @@ std::int32_t get_entry_value(const pugi::xml_node& node) {
 }
 
 Declaration get_declaration(const pugi::xml_node& node, std::vector<std::string>& required_interfaces, bool is_request) {
+	auto is_destructor = get_destructor(node);
 	Declaration declaration = Declaration {
-		.name = is_request ? get_pascal_name(node) : get_name(node),
+		.name = is_request ? get_pascal_name(node) : get_name(node), // requests get pascal cased names, events get snake case
+		.annotation = is_destructor ? "[[=WlDeclaration::Destructor]]" : "[[=WlDeclaration::None]]",
 		.description = get_description(node.child("description")),
 		.since = get_since(node),
-		.is_destructor = get_destructor(node),
 	};
 
 	for (pugi::xml_node node : node.children("arg")) {
+		auto [annotation, type] = convert_type(node, required_interfaces);
 		declaration.arguments.push_back(Argument {
 			.name = get_name(node),
-			.type = convert_type(node, required_interfaces),
+			.annotation = annotation,
+			.type = type,
 			.description = get_description(node),
 			.interface_name = optional_string(node, "interface"),
 			.enum_name = optional_string(node, "enum"),
