@@ -68,8 +68,8 @@ class Client {
 			if (bytes_sent == -1) {
 				// EAGAIN means may succeed in future
 				if (!(errno == EAGAIN || errno == EWOULDBLOCK)) {
-                    // Send failed, return false
-                    return false;
+					// Send failed, return false
+					return false;
 				}
 			} else {
 				event_fds.clear();
@@ -83,13 +83,19 @@ class Client {
 
 	template<WlType Wl, typename T>
 	void serialise_field(std::vector<std::uint8_t>& message, std::vector<int>& fds, const T& value) {
-		if constexpr (
+		if constexpr (Wl == WlType::NullableObject) {
+			const std::uint32_t raw = value.value_or(0);
+			const auto old_size = message.size();
+			message.resize(old_size + sizeof(raw));
+			std::memcpy(message.data() + old_size, &raw, sizeof(raw));
+		} else if constexpr (
 			Wl == WlType::Int ||
 			Wl == WlType::Uint ||
 			Wl == WlType::Object ||
 			Wl == WlType::NewId ||
-			Wl == WlType::Enum) {
-			const std::size_t old_size = message.size();
+			Wl == WlType::Enum ||
+			Wl == WlType::NullableObject) {
+			const auto old_size = message.size();
 			message.resize(old_size + sizeof(value));
 			std::memcpy(message.data() + old_size, &value, sizeof(value));
 
@@ -102,16 +108,34 @@ class Client {
 		} else if constexpr (Wl == WlType::Fd) {
 			fds.push_back(value);
 
-		} else if constexpr (Wl == WlType::String) {
+		} else if constexpr (Wl == WlType::String || Wl == WlType::NullableString) {
+			std::string_view raw;
+			if constexpr (Wl == WlType::NullableString) {
+				if (!value) {
+					const std::uint32_t count = 0;
+					const std::size_t old_size = message.size();
+
+					message.resize(old_size + sizeof(count));
+					std::memcpy(
+						message.data() + old_size,
+						&count,
+						sizeof(count));
+					return;
+				}
+
+				raw = *value;
+			} else {
+				raw = value;
+			}
 			// + 1 For null term
-			const std::uint32_t count = static_cast<std::uint32_t>(value.size() + 1);
+			const std::uint32_t count = static_cast<std::uint32_t>(raw.size() + 1);
 			const std::size_t old_size = message.size();
 			const std::size_t padded_count = (count + 3u) & ~3u; // Pad to next multiple of 4
 
 			// Account for prefix
 			message.resize(old_size + sizeof(std::uint32_t) + padded_count);
-			std::memcpy(message.data() + old_size, &count, sizeof(count));								// Copy prefix
-			std::memcpy(message.data() + old_size + sizeof(std::uint32_t), value.data(), value.size()); // Copy string
+			std::memcpy(message.data() + old_size, &count, sizeof(count));							// Copy prefix
+			std::memcpy(message.data() + old_size + sizeof(std::uint32_t), raw.data(), raw.size()); // Copy string
 
 		} else if constexpr (Wl == WlType::Array) {
 			const std::uint32_t count = static_cast<std::uint32_t>(value.size());
@@ -129,11 +153,20 @@ class Client {
 
 	template<WlType Wl, typename T>
 	T deserialise_field(std::vector<std::uint8_t>& message) {
-		if constexpr (Wl == WlType::Int ||
-					  Wl == WlType::Uint ||
-					  Wl == WlType::Object ||
-					  Wl == WlType::NewId ||
-					  Wl == WlType::Enum) {
+
+		if constexpr (Wl == WlType::NullableObject) {
+			std::uint32_t value;
+			std::memcpy(&value, message.data(), sizeof(value));
+			message.erase(message.begin(), message.begin() + sizeof(value));
+			if (value == 0) {
+				return std::nullopt;
+			}
+			return value;
+		} else if constexpr (Wl == WlType::Int ||
+							 Wl == WlType::Uint ||
+							 Wl == WlType::Object ||
+							 Wl == WlType::NewId ||
+							 Wl == WlType::Enum) {
 			T value;
 			std::memcpy(&value, message.data(), sizeof(value));
 			message.erase(message.begin(), message.begin() + sizeof(value));
@@ -156,12 +189,19 @@ class Client {
 			// with no byte marker, we're unable to deliminate between which message
 			// an FD belongs to
 			return value;
-		} else if constexpr (Wl == WlType::String) {
+		} else if constexpr (Wl == WlType::String || Wl == WlType::NullableString) {
 			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit, plus a null terminator at the end (included in byte count)
 			std::uint32_t count;
 			std::memcpy(&count, message.data(), sizeof(count));
 			message.erase(message.begin(), message.begin() + sizeof(count));
-			T value(message.begin(), message.begin() + (count - 1));
+
+			if constexpr (Wl == WlType::NullableString) {
+				if (count == 0) {
+					return std::nullopt;
+				}
+			}
+
+			std::string value(message.begin(), message.begin() + (count - 1));
 
 			// Round the count up to the nearest 4
 			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));

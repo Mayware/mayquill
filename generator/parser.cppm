@@ -81,6 +81,11 @@ std::string snake_to_pascal(std::string target) {
 	return target;
 }
 
+bool get_allow_null(const pugi::xml_node& node) {
+	auto allow_null = node.attribute("allow-null");
+	return allow_null ? allow_null.as_bool() : false;
+}
+
 /*
  *  Types:
  *  int / uint : 32 bits
@@ -112,6 +117,14 @@ std::tuple<std::string, std::string> convert_type(const pugi::xml_node& node, st
 			enum_str = snake_to_pascal(enum_str);
 		}
 		return {"[[=WlType::Enum]]", enum_str + "Enum"};
+	}
+
+	if (get_allow_null(node)) {
+		if (type == "object") {
+			return {"[[=WlType::NullableObject]]", "std::optional<std::uint32_t>"};
+		} else if (type == "string") {
+			return {"[[=WlType::NullableString]]", "std::optional<std::string>"};
+		}
 	}
 
 	if (type == "int") {
@@ -159,11 +172,6 @@ std::uint32_t get_since(const pugi::xml_node& node) {
 	return since ? since.as_uint() : 1;
 }
 
-bool get_allow_null(const pugi::xml_node& node) {
-	auto allow_null = node.attribute("allow-null");
-	return allow_null ? allow_null.as_bool() : false;
-}
-
 bool get_destructor(const pugi::xml_node& node) {
 	auto type = node.attribute("type");
 
@@ -204,6 +212,32 @@ Declaration get_declaration(const pugi::xml_node& node, std::vector<std::string>
 	};
 
 	for (pugi::xml_node node : node.children("arg")) {
+
+		// Explicit exception for when new_id type does not have the interface attribute.
+		// In this instance, this one arg expands into three: string, uint, and new_id (regular)
+		// The other regular convert_type call will add the new_id arg. Yeah, it's pretty retarded,
+		// but the spec mandates it: https://wayland.freedesktop.org/docs/book/Message_XML.html#arg-type
+		// As far as I can see, it's only used in wl_registry.bind, so no clue why it isn't just 3 args
+		if (std::string_view(node.attribute("type").as_string()) == "new_id" && !node.attribute("interface")) {
+			declaration.arguments.push_back(Argument {
+				.name = "interface",
+				.annotation = "[[=WlType::String]]",
+				.type = "std::string",
+				.description = {},
+				.interface_name = std::nullopt,
+				.enum_name = std::nullopt,
+				.allow_null = false,
+			});
+			declaration.arguments.push_back(Argument {
+				.name = "version",
+				.annotation = "[[=WlType::Uint]]",
+				.type = "std::uint32_t",
+				.description = {},
+				.interface_name = std::nullopt,
+				.enum_name = std::nullopt,
+				.allow_null = false,
+			});
+		}
 		auto [annotation, type] = convert_type(node, required_interfaces);
 		declaration.arguments.push_back(Argument {
 			.name = get_name(node),

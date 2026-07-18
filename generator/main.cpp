@@ -184,7 +184,7 @@ int main() {
 				}
 
 				content += "\n    void handle_destroy();"
-                           "\n    void destroy();";
+						   "\n    void destroy();";
 
 				// Generate events
 				for (std::size_t iter = 0; iter < interface.events.size(); ++iter) {
@@ -241,7 +241,7 @@ int main() {
 					content += "}\n\n";
 				}
 
-                content += std::format("void {}::destroy() {{\n    handle_destroy();\n    client.remove_object(id);\n}}\n\n", struct_name);
+				content += std::format("void {}::destroy() {{\n    handle_destroy();\n    client.remove_object(id);\n}}\n\n", struct_name);
 
 				// Only generate a default unhandled handle method, if requests exist
 				if (!interface.requests.empty()) {
@@ -258,6 +258,13 @@ int main() {
 					"\n[[gnu::weak]]\n"
 					"void {}::handle_destroy() {{}}\n",
 					struct_name);
+
+				// Opt the bitfield enums into the bitfield operators
+				for (auto& wlenum : interface.enums) {
+					if (wlenum.bitfield) {
+						content += std::format("\ntemplate<> constexpr bool enable_bitfield_operators<{}::{}> = true;", struct_name, wlenum.name);
+					}
+				}
 
 				content += "};";
 
