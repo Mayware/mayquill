@@ -6,25 +6,15 @@ import :definitions;
 import :interface;
 
 export namespace mayquill {
-struct Client {
-	int fd;
+class Client {
+	friend class Server;
+
+  private:
 	std::vector<std::optional<Interface>> objects; // Index is the objectid, 0th index is wasted
 
 	// Part of messages received
 	std::vector<std::uint8_t> data;
 	std::vector<int> fds;
-
-	Client(int fd) : fd(fd) {}
-
-	template<typename T>
-	void add_object(std::uint32_t id) {
-		if (id >= objects.size()) {
-			objects.resize(id + 1);
-		}
-		objects[id] = T {
-			.client = this,
-			.id = id};
-	}
 
 	template<WlType Wl, typename T>
 	T deserialise_field(std::vector<std::uint8_t>& message) {
@@ -86,7 +76,7 @@ struct Client {
 		// Strip the header from the message, we have no more use for it
 		message.erase(message.begin(), message.begin() + sizeof(Header));
 
-#ifndef __clang__
+#ifdef MAYQUILL_ICE
 		static constexpr auto fields = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
 		static constexpr auto wl_types = get_wl_types(fields);
 
@@ -101,41 +91,21 @@ struct Client {
 #endif
 	}
 
-	void parse_message(std::vector<std::uint8_t> message) {
-		Header header;
-		std::memcpy(&header, message.data(), sizeof(Header));
-		std::println("Object ID: {}", header.object_id);
+	void parse_message(std::vector<std::uint8_t> message); // Defined in impl
 
-		Interface& object = *this->objects.at(header.object_id); // TODO sec
+	Client(int fd) : fd(fd) {}
 
-		std::visit([&](auto& interface) {
-			// Get the actual type
-			using T = std::decay_t<decltype(interface)>;
+  public:
+	int fd;
 
-			// Check if the nested request type exists
-			// If it does, we'll parse the args accordingly
-			// If it doesn't, then there shouldn't be any args
-			if constexpr (requires { typename T::Request; }) {
-#ifndef __clang__
-				// Template for stamps out each iteration at compile time
-				// This is needed, as getting the variant at an index requires a comptime value
-				// Template for only supports range-based syntax, hence the iota
-				template for (constexpr auto i : std::views::iota(0uz, std::variant_size_v<typename T::Request>)) {
-					// I tried to find a way to do a jump table directly, but was unable to
-					// In reality, it will probably optimise to if statements since there are few cases
-					// but this is something I want to come back to
-					if (header.opcode == i) {
-						using Alternative = std::variant_alternative_t<i, typename T::Request>;
-						auto alternative = deserialise_struct<Alternative>(std::move(message));
-						interface.handle(alternative);
-						return;
-					}
-				}
-#endif
-				std::println("No opcode matched: {}", header.opcode);
-			}
-		},
-			object);
+	template<typename T>
+	void add_object(std::uint32_t id) {
+		if (id >= objects.size()) {
+			objects.resize(id + 1);
+		}
+		objects[id] = T {
+			.client = this,
+			.id = id};
 	}
 };
 }; // namespace mayquill

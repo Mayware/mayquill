@@ -1,7 +1,7 @@
-export module mayquill:definitions;
+module mayquill:definitions;
 import std;
 
-export namespace mayquill {
+namespace mayquill {
 enum class WlType {
 	Int,
 	Uint,
@@ -25,7 +25,7 @@ struct Header {
 	std::uint16_t size;
 };
 
-#ifndef __clang__
+#ifdef MAYQUILL_ICE
 consteval auto get_wl_types(std::span<const std::meta::info> fields) {
 	std::vector<WlType> wl_types(fields.size());
 

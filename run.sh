@@ -2,18 +2,23 @@
 set -e
 cd "$(dirname "$0")"
 
-echo -e "\033[0;32mBuilding lsp\033[0m"
-ninja -C build/build-lsp
+build() {
+    if [ -d "build/build-$1" ]; then
+        echo -e "\033[0;32mBuilding $1\033[0m"
+        ninja -C "build/build-$1"
+    fi
+}
 
-echo -e "\033[0;32mBuilding regular\033[0m"
-ninja -C build/build-mayquill
+build clang
+build clang-p2996
+build gcc
 
 cleanup() {
-    echo "Cleaning stale socket"
+    printf "\n%s" "Cleaning stale socket"
     rm -f "${XDG_RUNTIME_DIR}/wayland-0"
 }
 
 trap cleanup EXIT
 
 echo "Running program"
-./build/build-mayquill/mayquill
+./build/build-gcc/mayquill

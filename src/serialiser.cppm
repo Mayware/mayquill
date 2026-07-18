@@ -92,7 +92,7 @@ void serialise_field(std::vector<std::uint8_t>& message, std::vector<int>& fds, 
 	}
 }
 
-#ifndef __clang__
+#ifdef MAYQUILL_ICE
 template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>
 void serialise(int fd, std::uint32_t object_id, const Args&... args) {
 	static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));

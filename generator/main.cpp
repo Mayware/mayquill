@@ -42,7 +42,7 @@ import parser;
 // }
 
 std::string discriminate_clang(std::string_view content) {
-	return std::format("\n#ifndef __clang__\n{}\n#endif\n", content);
+	return std::format("\n#ifdef MAYQUILL_ICE\n{}\n#endif\n", content);
 }
 
 std::string pascal_to_snake(std::string target) {
@@ -90,7 +90,7 @@ int main() {
 	{
 		std::string content = "";
 		add_header(content);
-		content += "export module mayquill:interface;\n"
+		content += "module mayquill:interface;\n"
 				   "import std;\n\n";
 
 		// Write the imports
@@ -129,7 +129,7 @@ int main() {
 					"export module mayquill:{}.{};\n"
 					"import std;\n"
 					"import :definitions;\n"
-					"import :client_forward;\n\n",
+					"export import :client_forward;\n\n",
 					protocol.name, interface.name);
 
 				for (auto& required_interface : interface.required_interfaces) {

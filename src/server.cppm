@@ -5,17 +5,27 @@ module;
 #include <sys/un.h>
 #include <unistd.h>
 export module mayquill:server;
+export import :client;
 import :wayland.wl_display;
 import :definitions;
-import :client;
 
 export namespace mayquill {
 class Server {
   private:
-	int fd;
 	std::vector<std::unique_ptr<Client>> clients;
 
+	void remove_client(int fd) {
+		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
+			if ((*it)->fd == fd) {
+				this->clients.erase(it);
+				break;
+			}
+		}
+	}
+
   public:
+	int fd;
+
 	void bind_socket() {
 		std::string directory;
 		{
@@ -71,7 +81,7 @@ class Server {
 			}
 
 			// New client accepted
-			auto client = std::make_unique<Client>(fd);
+			auto client = std::unique_ptr<Client>(new Client(fd));
 			// Add default display object
 			client->add_object<WlDisplay>(1);
 			this->clients.push_back(std::move(client));
@@ -169,15 +179,6 @@ class Server {
 
 		for (auto fd : disconnected_fds) {
 			this->remove_client(fd);
-		}
-	}
-
-	void remove_client(int fd) {
-		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
-			if ((*it)->fd == fd) {
-				this->clients.erase(it);
-				break;
-			}
 		}
 	}
 };
