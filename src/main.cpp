@@ -11,7 +11,7 @@ int main() {
 	server.bind_socket();
 
 	while (true) {
-        server.accept_clients();
-        server.try_listen();
+        server.try_accept_clients();
+        server.try_listen_requests();
 	}
 }

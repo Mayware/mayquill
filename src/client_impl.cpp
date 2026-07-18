@@ -11,7 +11,7 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 	std::memcpy(&header, message.data(), sizeof(Header));
 	std::println("Object ID: {}", header.object_id);
 
-	Interface& object = *this->objects.at(header.object_id); // TODO sec
+	Interface& object = this->objects.at(header.object_id); // TODO sec
 
 	std::visit([&](auto& interface) {
 		// Get the actual type

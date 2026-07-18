@@ -9,6 +9,8 @@ import std;
 import :definitions;
 import :interface;
 
+static constexpr std::uint32_t server_id_start = 0xff000000u;
+
 export namespace mayquill {
 class Server;
 
@@ -17,7 +19,7 @@ class Client {
 
   private:
 	Server& server;
-	std::vector<std::optional<Interface>> objects; // Index is the objectid, 0th index is wasted
+	std::unordered_map<std::uint32_t, Interface> objects; // Index is the objectid, 0th index is wasted
 
 	// Part of outgoing messages (events)
 	std::vector<std::uint8_t> event_data;
@@ -29,7 +31,7 @@ class Client {
 
 	Client(Server& server, int fd) : server(server), fd(fd) {}
 
-	void flush_events() {
+	bool flush_events() {
 		if (!event_data.empty()) {
 			ssize_t bytes_sent;
 			if (event_fds.empty()) {
@@ -65,12 +67,10 @@ class Client {
 			}
 			if (bytes_sent == -1) {
 				// EAGAIN means may succeed in future
-				if (errno == EAGAIN || errno == EWOULDBLOCK) {
-					return;
+				if (!(errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    // Send failed, return false
+                    return false;
 				}
-
-				// Socket operation failed, assume socket dead
-				destroy();
 			} else {
 				event_fds.clear();
 				event_data.erase(
@@ -78,6 +78,7 @@ class Client {
 					event_data.begin() + bytes_sent);
 			}
 		}
+		return true;
 	}
 
 	template<WlType Wl, typename T>
@@ -201,12 +202,15 @@ class Client {
 #endif
 	}
 
-    // destroy calls handle_destroy(), then tells the server to remove this client
-    void destroy();
+	// destroy calls handle_destroy(), then tells the server to remove this client
+	void destroy();
 	void process_request(std::vector<std::uint8_t> message);
-    // Configuration points
-    void handle_destroy();
-    void handle_init();
+	// Configuration points
+	void handle_destroy();
+	void handle_init();
+
+	std::uint32_t current_server_id = server_id_start;
+	bool disconnect_pending = false;
 
   public:
 	int fd;
@@ -220,17 +224,30 @@ class Client {
 
 	template<typename T>
 	void add_object(std::uint32_t id) {
-		if (id >= objects.size()) {
-			objects.resize(id + 1);
-		}
-		objects[id].emplace(T {
-			.client = *this,
-			.id = id});
+		objects.emplace(
+			id,
+			Interface {T {
+				.client = *this,
+				.id = id,
+			}});
 	}
 
-    void remove_object(std::uint32_t id) {
-        objects[id] = std::nullopt;
-    }
+	void remove_object(std::uint32_t id) {
+		objects.erase(id);
+
+		// Tell wl_display that they can reuse this id, if they allocated it
+		if (id < server_id_start) {
+			std::get<WlDisplay>(objects.at(1)).delete_id(id);
+		}
+	}
+
+	std::uint32_t next_id() {
+		return current_server_id++;
+	}
+
+	void disconnect_after_flushed() {
+		disconnect_pending = true;
+	}
 
 #ifdef MAYQUILL_ICE
 	template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>

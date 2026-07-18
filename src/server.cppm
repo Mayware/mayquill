@@ -75,9 +75,9 @@ class Server {
 			auto client = std::unique_ptr<Client>(new Client(*this, fd));
 			// Add default display object
 			client->add_object<WlDisplay>(1);
-            Client* client_ptr = client.get();
+			Client* client_ptr = client.get();
 			this->clients.push_back(std::move(client));
-            client_ptr->handle_init();
+			client_ptr->handle_init();
 			std::println("Accepted a new client");
 		}
 	}
@@ -175,20 +175,35 @@ class Server {
 		}
 	}
 
-    void try_flush_events() {
-        for (auto& client : clients) {
-            client.get()->flush_events();
-        }
-    }
+	void try_flush_events() {
+		std::vector<Client*> disconnected_clients;
+
+		for (auto& client : clients) {
+			if (!client->flush_events()) {
+                // Send failed, consider it disconnected
+				disconnected_clients.push_back(client.get());
+				continue;
+			}
+
+			// If the client wants to kill itself, do so after it has no more data to send
+			if (client->disconnect_pending && client->event_data.empty()) {
+				disconnected_clients.push_back(client.get());
+			}
+		}
+
+		for (Client* client : disconnected_clients) {
+			client->destroy();
+		}
+	}
 
 	void remove_client(Client* client) {
 		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
 			if ((*it).get() == client) {
 				this->clients.erase(it);
-                return;
+				return;
 			}
 		}
-        throw std::runtime_error("Tried to destroy a nonexistent client");
+		throw std::runtime_error("Tried to destroy a nonexistent client");
 	}
 };
 } // namespace mayquill
