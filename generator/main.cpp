@@ -138,7 +138,7 @@ int main() {
 
 				content += "export namespace mayquill {\n";
 				content += std::format("struct {} {{\n"
-									   "    Client* client;\n"
+									   "    Client& client;\n"
 									   "    std::uint32_t id;\n",
 					struct_name);
 
@@ -154,7 +154,7 @@ int main() {
 
 				// Write the request structs
 				for (auto& request : interface.requests) {
-                    content += "   struct";
+					content += "   struct";
 					content += discriminate_clang(std::format("   {}", request.annotation));
 					content += std::format("    {} {{", request.name);
 
@@ -182,6 +182,9 @@ int main() {
 					content += ">;\n"
 							   "    void handle(Request request); // Will be overidden by downstream user";
 				}
+
+				content += "\n    void handle_destroy();"
+                           "\n    void destroy();";
 
 				// Generate events
 				for (std::size_t iter = 0; iter < interface.events.size(); ++iter) {
@@ -211,7 +214,6 @@ int main() {
 				std::string content = "";
 				add_header(content);
 				content += "module mayquill;\n"
-						   "import :serialiser;\n"
 						   "import :client;\n\n"
 						   "namespace mayquill {\n";
 
@@ -230,7 +232,7 @@ int main() {
 					content += ") {";
 
 					// Parameters can shadow the function name, so use full type specifier
-					auto definition = std::format("    serialise<^^{}::{}, {}>(client->fd, this->id ", struct_name, event.name, iter);
+					auto definition = std::format("    client.handle_event<^^{}::{}, {}>(this->id ", struct_name, event.name, iter);
 					for (auto& argument : event.arguments) {
 						definition += std::format(", {}", argument.name);
 					}
@@ -238,6 +240,8 @@ int main() {
 					content += discriminate_clang(definition);
 					content += "}\n\n";
 				}
+
+                content += std::format("void {}::destroy() {{\n    handle_destroy();\n    client.remove_object(id);\n}}\n\n", struct_name);
 
 				// Only generate a default unhandled handle method, if requests exist
 				if (!interface.requests.empty()) {
@@ -249,9 +253,15 @@ int main() {
 						"}}\n",
 						struct_name, struct_name, struct_name);
 				}
+
+				content += std::format(
+					"\n[[gnu::weak]]\n"
+					"void {}::handle_destroy() {{}}\n",
+					struct_name);
+
 				content += "};";
 
-                // .cpp instead of .cppm as clang expects non-interface modules to not be called .cppm
+				// .cpp instead of .cppm as clang expects non-interface modules to not be called .cppm
 				write_file(interface.name + "_impl.cpp", std::move(content));
 			}
 		}

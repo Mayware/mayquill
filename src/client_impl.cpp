@@ -1,12 +1,12 @@
 module mayquill;
 import std;
 import :client;
+import :definitions;
 
-// This is a completely arbitrary split, to avoid corrupted module cluster data from the client module
+// This is a completely arbitrary split for parse_message, to avoid corrupted module cluster data from the client module
 // ie. without this we run into GCC ICE
-
 namespace mayquill {
-void Client::parse_message(std::vector<std::uint8_t> message) {
+void Client::handle_request(std::vector<std::uint8_t> message) {
 	Header header;
 	std::memcpy(&header, message.data(), sizeof(Header));
 	std::println("Object ID: {}", header.object_id);
@@ -33,6 +33,13 @@ void Client::parse_message(std::vector<std::uint8_t> message) {
 					using Alternative = std::variant_alternative_t<i, typename T::Request>;
 					auto alternative = deserialise_struct<Alternative>(std::move(message));
 					interface.handle(alternative);
+                    static constexpr auto wl_declaration = std::meta::extract<WlDeclaration>(
+                        // Ask for the reflections on the original type, not on the alias
+                        std::meta::annotations_of(std::meta::dealias(^^Alternative))[0]
+                    );
+                    if constexpr (wl_declaration == WlDeclaration::Destructor) {
+                        interface.destroy();
+                    }
 					return;
 				}
 			}
@@ -42,4 +49,17 @@ void Client::parse_message(std::vector<std::uint8_t> message) {
 	},
 		object);
 }
+
+[[gnu::weak]]
+void Client::handle_destroy() {}
+
+[[gnu::weak]]
+void Client::handle_init() {}
+
+void Client::destroy() {
+    handle_destroy();
+    server.remove_client(this);
+}
+
+
 }; // namespace mayquill

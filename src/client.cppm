@@ -1,20 +1,130 @@
 module;
 #include <cassert>
+#include <cerrno>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 export module mayquill:client;
 import std;
 import :definitions;
 import :interface;
 
 export namespace mayquill {
+class Server;
+
 class Client {
 	friend class Server;
 
   private:
+	Server& server;
 	std::vector<std::optional<Interface>> objects; // Index is the objectid, 0th index is wasted
 
-	// Part of messages received
-	std::vector<std::uint8_t> data;
-	std::vector<int> fds;
+	// Part of outgoing messages (events)
+	std::vector<std::uint8_t> event_data;
+	std::vector<int> event_fds;
+
+	// Part of messages received (requests)
+	std::vector<std::uint8_t> request_data;
+	std::vector<int> request_fds;
+
+	Client(Server& server, int fd) : server(server), fd(fd) {}
+
+	void flush_events() {
+		if (!event_data.empty()) {
+			ssize_t bytes_sent;
+			if (event_fds.empty()) {
+				bytes_sent = send(fd, event_data.data(), event_data.size(), 0);
+			} else {
+				const std::size_t fd_bytes = sizeof(int) * event_fds.size();
+				alignas(cmsghdr) char control_buffer[CMSG_SPACE(fd_bytes)];
+
+				iovec io_vector {
+					.iov_base = event_data.data(),
+					.iov_len = event_data.size(),
+				};
+
+				msghdr message_header {
+					.msg_iov = &io_vector,
+					.msg_iovlen = 1,
+					.msg_control = control_buffer,
+					.msg_controllen = sizeof(control_buffer),
+				};
+
+				cmsghdr* cmsg = CMSG_FIRSTHDR(&message_header);
+
+				cmsg->cmsg_level = SOL_SOCKET;
+				cmsg->cmsg_type = SCM_RIGHTS;
+				cmsg->cmsg_len = CMSG_LEN(fd_bytes);
+
+				std::memcpy(
+					CMSG_DATA(cmsg),
+					event_fds.data(),
+					fd_bytes);
+
+				bytes_sent = sendmsg(fd, &message_header, 0);
+			}
+			if (bytes_sent == -1) {
+				// EAGAIN means may succeed in future
+				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					return;
+				}
+
+				// Socket operation failed, assume socket dead
+				destroy();
+			} else {
+				event_fds.clear();
+				event_data.erase(
+					event_data.begin(),
+					event_data.begin() + bytes_sent);
+			}
+		}
+	}
+
+	template<WlType Wl, typename T>
+	void serialise_field(std::vector<std::uint8_t>& message, std::vector<int>& fds, const T& value) {
+		if constexpr (
+			Wl == WlType::Int ||
+			Wl == WlType::Uint ||
+			Wl == WlType::Object ||
+			Wl == WlType::NewId ||
+			Wl == WlType::Enum) {
+			const std::size_t old_size = message.size();
+			message.resize(old_size + sizeof(value));
+			std::memcpy(message.data() + old_size, &value, sizeof(value));
+
+		} else if constexpr (Wl == WlType::Fixed) {
+			const std::int32_t raw = static_cast<std::int32_t>(value * 256.0);
+			const std::size_t old_size = message.size();
+			message.resize(old_size + sizeof(raw));
+			std::memcpy(message.data() + old_size, &raw, sizeof(raw));
+
+		} else if constexpr (Wl == WlType::Fd) {
+			fds.push_back(value);
+
+		} else if constexpr (Wl == WlType::String) {
+			// + 1 For null term
+			const std::uint32_t count = static_cast<std::uint32_t>(value.size() + 1);
+			const std::size_t old_size = message.size();
+			const std::size_t padded_count = (count + 3u) & ~3u; // Pad to next multiple of 4
+
+			// Account for prefix
+			message.resize(old_size + sizeof(std::uint32_t) + padded_count);
+			std::memcpy(message.data() + old_size, &count, sizeof(count));								// Copy prefix
+			std::memcpy(message.data() + old_size + sizeof(std::uint32_t), value.data(), value.size()); // Copy string
+
+		} else if constexpr (Wl == WlType::Array) {
+			const std::uint32_t count = static_cast<std::uint32_t>(value.size());
+			const std::size_t old_size = message.size();
+			const std::size_t padded_count = (count + 3u) & ~3u;
+			message.resize(old_size + sizeof(std::uint32_t) + padded_count, 0);
+			std::memcpy(message.data() + old_size, &count, sizeof(count));
+			if (count != 0)
+				std::memcpy(message.data() + old_size + sizeof(std::uint32_t), value.data(), count);
+
+		} else {
+			static_assert(false, "Invalid WlType passed");
+		}
+	}
 
 	template<WlType Wl, typename T>
 	T deserialise_field(std::vector<std::uint8_t>& message) {
@@ -36,10 +146,10 @@ class Client {
 			T value = static_cast<T>(raw) / 256.0;
 			return value;
 		} else if constexpr (Wl == WlType::Fd) {
-			assert(!this->fds.empty() && "Expected an FD, but vector was empty");
+			assert(!this->request_fds.empty() && "Expected an FD, but vector was empty");
 			T value;
-			std::memcpy(&value, &fds.front(), sizeof(T));
-			this->fds.erase(this->fds.begin());
+			std::memcpy(&value, &request_fds.front(), sizeof(T));
+			this->request_fds.erase(this->request_fds.begin());
 			// No need to consume byte stream, as FDs are purely ancillary data
 			// This also prevented us from having a separate Vec<Messages>, because
 			// with no byte marker, we're unable to deliminate between which message
@@ -91,21 +201,65 @@ class Client {
 #endif
 	}
 
-	void parse_message(std::vector<std::uint8_t> message); // Defined in impl
-
-	Client(int fd) : fd(fd) {}
+    // destroy calls handle_destroy(), then tells the server to remove this client
+    void destroy();
+    // Configuration points
+	void handle_request(std::vector<std::uint8_t> message);
+    void handle_destroy();
+    void handle_init();
 
   public:
 	int fd;
+
+	~Client() {
+		close(fd);
+		for (auto fd : request_fds) {
+			close(fd);
+		}
+	}
 
 	template<typename T>
 	void add_object(std::uint32_t id) {
 		if (id >= objects.size()) {
 			objects.resize(id + 1);
 		}
-		objects[id] = T {
-			.client = this,
-			.id = id};
+		objects[id].emplace(T {
+			.client = *this,
+			.id = id});
 	}
+
+    void remove_object(std::uint32_t id) {
+        objects[id] = std::nullopt;
+    }
+
+#ifdef MAYQUILL_ICE
+	template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>
+	void handle_event(std::uint32_t object_id, const Args&... args) {
+		static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));
+		static constexpr auto wl_types = get_wl_types(parameters);
+
+		auto offset = event_data.size();
+		event_data.resize(offset + sizeof(Header)); // Add reserved space for the header
+
+		template for (constexpr auto i : std::views::iota(0uz, wl_types.size())) {
+			serialise_field<wl_types[i]>(
+				event_data,
+				event_fds,
+				args...[i]);
+		}
+
+		// Rewrite the header reserved space, now we know the size
+		const Header header {
+			.object_id = object_id,
+			.opcode = Opcode,
+			.size = static_cast<std::uint16_t>(event_data.size() - offset),
+		};
+
+		std::memcpy(
+			event_data.data() + offset,
+			&header,
+			sizeof(header));
+	}
+#endif
 };
 }; // namespace mayquill

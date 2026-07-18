@@ -36,7 +36,6 @@ cmake -B build/build-gcc -G Ninja -Wno-dev \
     -DCMAKE_CXX_COMPILER=/opt/gcc-git/bin/g++ \
     -DCMAKE_CXX_FLAGS="-std=gnu++26 -freflection -DMAYQUILL_ICE" \
     -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,/opt/gcc-git/lib64" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath,/opt/gcc-git/lib64"
 
 jq -s 'add' \
   build/build-clang/compile_commands.json \

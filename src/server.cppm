@@ -14,15 +14,6 @@ class Server {
   private:
 	std::vector<std::unique_ptr<Client>> clients;
 
-	void remove_client(int fd) {
-		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
-			if ((*it)->fd == fd) {
-				this->clients.erase(it);
-				break;
-			}
-		}
-	}
-
   public:
 	int fd;
 
@@ -81,10 +72,12 @@ class Server {
 			}
 
 			// New client accepted
-			auto client = std::unique_ptr<Client>(new Client(fd));
+			auto client = std::unique_ptr<Client>(new Client(*this, fd));
 			// Add default display object
 			client->add_object<WlDisplay>(1);
+            Client* client_ptr = client.get();
 			this->clients.push_back(std::move(client));
+            client_ptr->handle_init();
 			std::println("Accepted a new client");
 		}
 	}
@@ -94,10 +87,10 @@ class Server {
 	 *  32 bit    | 16 bit | 16 bit                    | Message Size minus 64 bits
 	 */
 	void try_listen() {
-		std::vector<int> disconnected_fds = {};
+		std::vector<Client*> disconnected_clients = {};
 
 		for (auto& unique_client : this->clients) {
-			auto client = *unique_client;
+			auto& client = *unique_client;
 			std::uint8_t buffer[128]; // (Remember, this is bytes) TODO 0 INIT
 
 			while (true) {
@@ -121,7 +114,7 @@ class Server {
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
 					std::println("Client disconnected");
-					disconnected_fds.push_back(client.fd);
+					disconnected_clients.push_back(&client);
 					break;
 				} else if (bytes_read == -1) {
 					if (errno == EWOULDBLOCK) {
@@ -139,7 +132,7 @@ class Server {
 				}
 
 				std::println("Read {} bytes", bytes_read);
-				client.data.insert(client.data.end(), buffer, buffer + bytes_read);
+				client.request_data.insert(client.request_data.end(), buffer, buffer + bytes_read);
 
 				// PBUG: I have avoided macros in this, because I didn't understand how there could be alignment between the
 				// cmsghdr and the payload, given the payload is just intgers. Hence, I have done it manually.
@@ -154,22 +147,22 @@ class Server {
 						std::size_t number_fds = (cmsg->cmsg_len - sizeof(cmsghdr)) / sizeof(int);
 						// CMSG_DATA just gives the first byte of the payload, which should be a packed int array of the fd ids
 						int* received_fds = reinterpret_cast<int*>(cmsg + 1); // Skip the header, pointer arithemtic will actually do cmsg + sizeof(cmsghdr) in human logic
-						client.fds.insert(client.fds.end(), received_fds, received_fds + number_fds);
+						client.request_fds.insert(client.request_fds.end(), received_fds, received_fds + number_fds);
 						std::println("Received {} fds", number_fds);
 					}
 				}
 
 				// If the header exists, try to parse it
-				while (client.data.size() >= 8) {
+				while (client.request_data.size() >= 8) {
 					std::uint16_t message_size;
-					std::memcpy(&message_size, client.data.data() + 6, sizeof(std::uint16_t));
+					std::memcpy(&message_size, client.request_data.data() + 6, sizeof(std::uint16_t));
 
 					// The message has been fully received
-					if (client.data.size() >= message_size) {
+					if (client.request_data.size() >= message_size) {
 						// TODO, find an elegant move, this is copy
-						std::vector<std::uint8_t> message(client.data.begin(), client.data.begin() + message_size);
-						client.data.erase(client.data.begin(), client.data.begin() + message_size);
-						client.parse_message(std::move(message));
+						std::vector<std::uint8_t> message(client.request_data.begin(), client.request_data.begin() + message_size);
+						client.request_data.erase(client.request_data.begin(), client.request_data.begin() + message_size);
+						client.handle_request(std::move(message));
 					} else {
 						break;
 					}
@@ -177,9 +170,19 @@ class Server {
 			}
 		}
 
-		for (auto fd : disconnected_fds) {
-			this->remove_client(fd);
+		for (auto client : disconnected_clients) {
+			client->destroy();
 		}
+	}
+
+	void remove_client(Client* client) {
+		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {
+			if ((*it).get() == client) {
+				this->clients.erase(it);
+                return;
+			}
+		}
+        throw std::runtime_error("Tried to destroy a nonexistent client");
 	}
 };
 } // namespace mayquill
