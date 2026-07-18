@@ -203,8 +203,8 @@ class Client {
 
     // destroy calls handle_destroy(), then tells the server to remove this client
     void destroy();
+	void process_request(std::vector<std::uint8_t> message);
     // Configuration points
-	void handle_request(std::vector<std::uint8_t> message);
     void handle_destroy();
     void handle_init();
 
@@ -234,7 +234,7 @@ class Client {
 
 #ifdef MAYQUILL_ICE
 	template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>
-	void handle_event(std::uint32_t object_id, const Args&... args) {
+	void process_event(std::uint32_t object_id, const Args&... args) {
 		static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));
 		static constexpr auto wl_types = get_wl_types(parameters);
 

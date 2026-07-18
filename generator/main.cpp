@@ -232,7 +232,7 @@ int main() {
 					content += ") {";
 
 					// Parameters can shadow the function name, so use full type specifier
-					auto definition = std::format("    client.handle_event<^^{}::{}, {}>(this->id ", struct_name, event.name, iter);
+					auto definition = std::format("    client.process_event<^^{}::{}, {}>(this->id ", struct_name, event.name, iter);
 					for (auto& argument : event.arguments) {
 						definition += std::format(", {}", argument.name);
 					}

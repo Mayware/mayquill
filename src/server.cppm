@@ -58,7 +58,7 @@ class Server {
 		std::println("Bound socket");
 	}
 
-	void accept_clients() {
+	void try_accept_clients() {
 		// Loop until we've accepted all clients
 		while (true) {
 			int fd = accept(this->fd, nullptr, nullptr);
@@ -86,7 +86,7 @@ class Server {
 	 *  Object Id | Opcode | Message Size (inc header) | Arguments then based on opcode
 	 *  32 bit    | 16 bit | 16 bit                    | Message Size minus 64 bits
 	 */
-	void try_listen() {
+	void try_listen_requests() {
 		std::vector<Client*> disconnected_clients = {};
 
 		for (auto& unique_client : this->clients) {
@@ -162,7 +162,7 @@ class Server {
 						// TODO, find an elegant move, this is copy
 						std::vector<std::uint8_t> message(client.request_data.begin(), client.request_data.begin() + message_size);
 						client.request_data.erase(client.request_data.begin(), client.request_data.begin() + message_size);
-						client.handle_request(std::move(message));
+						client.process_request(std::move(message));
 					} else {
 						break;
 					}
@@ -174,6 +174,12 @@ class Server {
 			client->destroy();
 		}
 	}
+
+    void try_flush_events() {
+        for (auto& client : clients) {
+            client.get()->flush_events();
+        }
+    }
 
 	void remove_client(Client* client) {
 		for (auto it = this->clients.begin(); it != this->clients.end(); ++it) {

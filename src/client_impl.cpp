@@ -6,7 +6,7 @@ import :definitions;
 // This is a completely arbitrary split for parse_message, to avoid corrupted module cluster data from the client module
 // ie. without this we run into GCC ICE
 namespace mayquill {
-void Client::handle_request(std::vector<std::uint8_t> message) {
+void Client::process_request(std::vector<std::uint8_t> message) {
 	Header header;
 	std::memcpy(&header, message.data(), sizeof(Header));
 	std::println("Object ID: {}", header.object_id);
