@@ -139,7 +139,8 @@ int main() {
 				content += "export namespace mayquill {\n";
 				content += std::format("struct {} {{\n"
 									   "    Client& client;\n"
-									   "    std::uint32_t id;\n",
+									   "    std::uint32_t id;\n"
+									   "    void* user_data;\n",
 					struct_name);
 
 				// Write the custom enums the interface may define
@@ -213,7 +214,9 @@ int main() {
 			{
 				std::string content = "";
 				add_header(content);
-				content += "module mayquill;\n"
+				content += "module;\n"
+						   "#include <cassert>\n"
+						   "module mayquill;\n"
 						   "import :client;\n\n"
 						   "namespace mayquill {\n";
 
@@ -241,7 +244,12 @@ int main() {
 					content += "}\n\n";
 				}
 
-				content += std::format("void {}::destroy() {{\n    handle_destroy();\n    client.remove_object(id);\n}}\n\n", struct_name);
+				content += std::format("void {}::destroy() {{\n"
+									   "   handle_destroy();\n"
+									   "   assert(user_data == nullptr && \"{} did not clean up user data before destruction - was not nullptr\");\n"
+									   "   client.remove_object(id);\n"
+									   "}}\n\n",
+					struct_name, struct_name);
 
 				// Only generate a default unhandled handle method, if requests exist
 				if (!interface.requests.empty()) {

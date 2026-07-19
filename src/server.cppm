@@ -61,7 +61,7 @@ class Server {
 	void try_accept_clients() {
 		// Loop until we've accepted all clients
 		while (true) {
-			int fd = accept(this->fd, nullptr, nullptr);
+			int fd = accept4(this->fd, nullptr, nullptr, SOCK_NONBLOCK);
 			if (fd == -1) {
 				if (!(errno == EWOULDBLOCK)) {
 					throw std::runtime_error(std::format("Failed to accept client: {}", std::strerror(errno)));
