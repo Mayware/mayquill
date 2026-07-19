@@ -52,7 +52,8 @@ std::optional<std::string> get_env(const std::string& name) {
 template<typename T>
 constexpr bool enable_bitfield_operators = false;
 
-// This operator has global scope within mayquill
+// Don't see the operator function as being any different to a regular function, when you do myfunction<MyType>()
+// the type | type thing works the same way
 template<typename T>
 	requires enable_bitfield_operators<T> // Only enable the operator, if they've set enable_bitfield_operators true for their T
 constexpr T operator|(T left, T right) {

@@ -72,6 +72,10 @@ class Client {
 					return false;
 				}
 			} else {
+				for (auto fd : event_fds) {
+					// Close our duplicated fd handle, since we've already sent it off
+					close(fd);
+				}
 				event_fds.clear();
 				event_data.erase(
 					event_data.begin(),
@@ -106,8 +110,13 @@ class Client {
 			std::memcpy(message.data() + old_size, &raw, sizeof(raw));
 
 		} else if constexpr (Wl == WlType::Fd) {
-			fds.push_back(value);
-
+			// Duplicate the fd, to get a second handle
+			// We do this, so if the caller closes their fd, we still have a valid fd to the file
+			// I've seen people recommend close on exec, but we never exec, so i don't see a point
+			auto dupe = dup(value);
+			if (dupe == -1)
+				throw std::runtime_error("Failed to dupe fd");
+			fds.push_back(dupe);
 		} else if constexpr (Wl == WlType::String || Wl == WlType::NullableString) {
 			std::string_view raw;
 			if constexpr (Wl == WlType::NullableString) {
@@ -258,6 +267,9 @@ class Client {
 	~Client() {
 		close(fd);
 		for (auto fd : request_fds) {
+			close(fd);
+		}
+		for (auto fd : event_fds) {
 			close(fd);
 		}
 	}
