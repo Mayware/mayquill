@@ -128,16 +128,8 @@ class Server {
 					} else {
 						MQ_ERRNO("Failed to read from fd {}", client.fd);
 						clients_to_destroy.push_back(&client);
-                        break;
+						break;
 					}
-				}
-
-				// Check if the ancilliary data fit. We don't want to wait to read it in the next loop, because potentially,
-				// it could be part of this message that will be processed in this loop, so disconnect the client
-				if (message_header.msg_flags & MSG_CTRUNC) {
-					client.error(1, WlDisplay::ErrorEnum::Implementation, "Control message was truncated, couldn't fit into buffer");
-                    // TODO WE LEAK ANY FDS WE DID RECEIVE HERE. Also, we may want to validate the number of FDs we receive is the number we expect, but it should only affect that client really
-					break;
 				}
 
 				MQ_DEBUG("Read {} bytes", bytes_read);
@@ -159,6 +151,15 @@ class Server {
 						client.request_fds.insert(client.request_fds.end(), received_fds, received_fds + number_fds);
 						MQ_DEBUG("Received {} fds", number_fds);
 					}
+				}
+
+                // Notice how we just read the FDs up above, but, only now we check if the ancillary data fit and wasn't truncated
+                // The above logic should work for fds that were receieved still (it just hits nullptr earlier), so that still gets added
+                // to the request_fds. If it didn't fit, we now error, so that will cleaned up any fds that did fit in the truncated buffer
+                // that we are obligated to close (so we dont leak)
+				if (message_header.msg_flags & MSG_CTRUNC) {
+					client.error(1, WlDisplay::ErrorEnum::Implementation, "Control message was truncated, couldn't fit into buffer");
+					break;
 				}
 
 				// If the header exists, try to parse it
@@ -183,11 +184,11 @@ class Server {
 						std::vector<std::uint8_t> message(client.request_data.begin(), client.request_data.begin() + message_size);
 						client.request_data.erase(client.request_data.begin(), client.request_data.begin() + message_size);
 						client.process_request(std::move(message));
-                        
-                        // If that previous call errors, make sure we don't potentially loop around again
-                        if (client.disconnect_pending) {
-                            break;
-                        }
+
+						// If that previous call errors, make sure we don't potentially loop around again
+						if (client.disconnect_pending) {
+							break;
+						}
 					} else {
 						break;
 					}
