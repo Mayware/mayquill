@@ -1,7 +1,3 @@
-.direnv
 .cache
 compile_commands.json
-in
-out
 build
-build-lsp
