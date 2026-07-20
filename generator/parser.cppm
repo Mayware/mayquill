@@ -169,7 +169,7 @@ Description get_description(const pugi::xml_node& node) {
 
 std::uint32_t get_since(const pugi::xml_node& node) {
 	auto since = node.attribute("since");
-	return since ? since.as_uint() : 1;
+	return since ? since.as_uint() : 1; // 1 is default
 }
 
 bool get_destructor(const pugi::xml_node& node) {

@@ -275,13 +275,16 @@ class Client {
 	}
 
 	template<typename T>
-	void add_object(std::uint32_t id) {
-		objects.emplace(
+	T& add_object(std::uint32_t id) {
+		auto [it, inserted] = objects.emplace(
 			id,
 			Interface {T {
 				.client = *this,
 				.id = id,
 			}});
+
+		assert(inserted && "Tried to insert an object that was already added");
+		return std::get<T>(it->second);
 	}
 
 	void remove_object(std::uint32_t id) {

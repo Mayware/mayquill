@@ -67,6 +67,10 @@ void write_file(std::string name, std::string content) {
 	std::print(file, "{}", content);
 }
 
+void add_since(std::string& content, std::uint32_t since) {
+	content += std::format("        static constexpr since = {};\n", since);
+}
+
 int main() {
 	auto protocols = parser::get_protocols();
 
@@ -75,7 +79,8 @@ int main() {
 		std::string content = "";
 		add_header(content);
 		content += "export module mayquill;\n"
-				   "export import :server;\n\n";
+				   "export import :server;\n"
+				   "export import :logger;\n\n";
 
 		for (auto& protocol : protocols) {
 			for (auto& interface : protocol.interfaces) {
@@ -138,10 +143,12 @@ int main() {
 
 				content += "export namespace mayquill {\n";
 				content += std::format("struct {} {{\n"
+                                       "    static constexpr std::string_view interface = \"{}\";\n"
+									   "    static constexpr std::uint32_t version = {};\n\n"
 									   "    Client& client;\n"
 									   "    std::uint32_t id;\n"
 									   "    void* user_data;\n",
-					struct_name);
+					struct_name, interface.name, interface.version);
 
 				// Write the custom enums the interface may define
 				for (auto& wlenum : interface.enums) {

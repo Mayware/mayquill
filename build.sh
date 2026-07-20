@@ -13,12 +13,7 @@ build clang
 build clang-p2996
 build gcc
 
-cleanup() {
-    printf "\n%s" "Cleaning stale socket"
-    rm -f "${XDG_RUNTIME_DIR}/wayland-0"
-}
-
-trap cleanup EXIT
-
-echo "Running program"
-./build/build-gcc/mayquill
+jq -s 'add' \
+  build/build-clang/compile_commands.json \
+  build/build-generator/compile_commands.json \
+  > compile_commands.json

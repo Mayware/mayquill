@@ -16,12 +16,6 @@ cmake -S generator -B build/build-generator -G Ninja -Wno-dev \
     -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
 ./gen.sh
 
-# echo -e "\033[0;32mGenerating GCC\033[0m"
-# cmake -B build/build-mayquill -G Ninja -Wno-dev \
-#     -DCMAKE_C_COMPILER=gcc \
-#     -DCMAKE_CXX_COMPILER=g++ \
-#     -DCMAKE_CXX_FLAGS="-std=gnu++26 -freflection"
-
 echo -e "\033[0;32mGenerating Clang\033[0m"
 cmake -B build/build-clang -G Ninja -Wno-dev \
     -DCMAKE_C_COMPILER=clang \
@@ -41,5 +35,3 @@ jq -s 'add' \
   build/build-clang/compile_commands.json \
   build/build-generator/compile_commands.json \
   > compile_commands.json
-
-

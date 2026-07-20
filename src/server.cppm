@@ -4,7 +4,9 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <mayquill/logger.h>
 export module mayquill:server;
+import :logger;
 export import :client;
 import :wayland.wl_display;
 import :definitions;
@@ -55,7 +57,7 @@ class Server {
 		}
 
 		this->fd = fd;
-		std::println("Bound socket");
+        MQ_DEBUG("Bound socket");
 	}
 
 	void try_accept_clients() {
