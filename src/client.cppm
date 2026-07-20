@@ -1,4 +1,5 @@
 module;
+#include "mayquill/logger.h"
 #include <cassert>
 #include <cerrno>
 #include <sys/socket.h>
@@ -8,6 +9,7 @@ export module mayquill:client;
 import std;
 import :definitions;
 import :interface;
+import :logger;
 
 static constexpr std::uint32_t server_id_start = 0xff000000u;
 
@@ -161,12 +163,12 @@ class Client {
 	}
 
 	template<WlType Wl, typename T>
-	T deserialise_field(std::vector<std::uint8_t>& message) {
+	T deserialise_field(std::span<const std::uint8_t>& message) {
 
 		if constexpr (Wl == WlType::NullableObject) {
-			std::uint32_t value;
-			std::memcpy(&value, message.data(), sizeof(value));
-			message.erase(message.begin(), message.begin() + sizeof(value));
+			auto bytes = advance(message, sizeof(std::uint32_t));
+			std::uint32_t value; // Explicitly use uint32_t, because T would be an optional<uint32_t>
+			std::memcpy(&value, bytes.data(), sizeof(value));
 			if (value == 0) {
 				return std::nullopt;
 			}
@@ -176,20 +178,21 @@ class Client {
 							 Wl == WlType::Object ||
 							 Wl == WlType::NewId ||
 							 Wl == WlType::Enum) {
+
+			auto bytes = advance(message, sizeof(T));
 			T value;
-			std::memcpy(&value, message.data(), sizeof(value));
-			message.erase(message.begin(), message.begin() + sizeof(value));
+			std::memcpy(&value, bytes.data(), sizeof(value));
 			return value;
 		} else if constexpr (Wl == WlType::Fixed) {
+			auto bytes = advance(message, sizeof(std::uint32_t));
 			std::int32_t raw;
-			std::memcpy(&raw, message.data(), sizeof(raw));
-			message.erase(message.begin(), message.begin() + sizeof(raw));
-
+			std::memcpy(&raw, bytes.data(), sizeof(raw));
 			// Divide by 2^8, to get the binary point leftwards 8 places
 			T value = static_cast<T>(raw) / 256.0;
 			return value;
 		} else if constexpr (Wl == WlType::Fd) {
-			assert(!this->request_fds.empty() && "Expected an FD, but vector was empty");
+			if (this->request_fds.empty())
+				MQ_XERROR("Expected an fd, but the vector was empty");
 			T value;
 			std::memcpy(&value, &request_fds.front(), sizeof(T));
 			this->request_fds.erase(this->request_fds.begin());
@@ -199,31 +202,36 @@ class Client {
 			// an FD belongs to
 			return value;
 		} else if constexpr (Wl == WlType::String || Wl == WlType::NullableString) {
+			auto bytes = advance(message, sizeof(std::uint32_t));
 			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit, plus a null terminator at the end (included in byte count)
 			std::uint32_t count;
-			std::memcpy(&count, message.data(), sizeof(count));
-			message.erase(message.begin(), message.begin() + sizeof(count));
-
-			if constexpr (Wl == WlType::NullableString) {
-				if (count == 0) {
+			std::memcpy(&count, bytes.data(), sizeof(count));
+			if (count == 0) {
+				// Count of 0 is what represents the null in nullable strings
+				if constexpr (Wl == WlType::NullableString) {
 					return std::nullopt;
+				} else {
+					// However, non-nullable strings cannot have a count of 0, since they must always
+					// have a trailing \0, to represent an empty string instead.
+					MQ_XERROR("The string wasn't nullable, yet it had a count of 0");
 				}
 			}
-
-			std::string value(message.begin(), message.begin() + (count - 1));
-
-			// Round the count up to the nearest 4
-			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
+			bytes = advance(message, count); // Consume the null terminator too
+			// Ensure the last thing was actually a null term, so we can directly cnstruct a string
+			if (bytes.back() != '\0')
+				MQ_XERROR("String wasn't null terminated, quite cheeky, wonder what you were trying to pull off here");
+			std::string value(bytes.begin(), bytes.end() - 1); // Ignore the null terminator
+			// Round the count up to the nearest 4, then consume JUST the padding it took, since we already consumed count
+			advance(message, ((count + 3) & ~3u) - count);
 			return value;
 		} else if constexpr (Wl == WlType::Array) {
+			auto bytes = advance(message, sizeof(std::uint32_t));
 			// 32 bit prefix, then n bytes (not including the prefix) padded to 32 bit
 			std::uint32_t count;
-			std::memcpy(&count, message.data(), sizeof(count));
-			message.erase(message.begin(), message.begin() + sizeof(count));
-			T value(message.begin(), message.begin() + count);
-
-			// Round the count up to the nearest 4
-			message.erase(message.begin(), message.begin() + ((count + 3) & ~3u));
+			std::memcpy(&count, bytes.data(), sizeof(count));
+			bytes = advance(message, count);
+			T value(bytes.begin(), bytes.end());
+			advance(message, ((count + 3) & ~3u) - count);
 			return value;
 		} else {
 			static_assert(false, "Invalid WlType passed");
@@ -232,9 +240,9 @@ class Client {
 
 	// T is the GeneratedModule::Request type
 	template<typename T>
-	T deserialise_struct(std::vector<std::uint8_t> message) {
+	T deserialise_struct(std::span<const std::uint8_t> message) {
 		// Strip the header from the message, we have no more use for it
-		message.erase(message.begin(), message.begin() + sizeof(Header));
+		advance(message, sizeof(Header));
 
 #ifdef MAYQUILL_ICE
 		static constexpr auto fields = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
@@ -244,11 +252,25 @@ class Client {
 		// ... produces an expression, whereas template for produces a statement. For new readers, this is a templated lambda,
 		// of which <std::size_t... n> is a non-type template parameter pack. Usually with parameter packs, they can vary in
 		// type between the n, but this defines it as they must all be of size_t.
-		return [this, &message]<std::size_t... N>(std::index_sequence<N...>) -> T {
+		return [this, message]<std::size_t... N>(std::index_sequence<N...>) mutable -> T {
 			return T {
 				this->deserialise_field<wl_types[N], typename[:std::meta::type_of(fields[N]):]>(message)...};
 		}(std::make_index_sequence<fields.size()> {});
+		// There can be extra data potentially let for message, that wasn't consumed, but it should be harmless on our end, so we'll ignore it
 #endif
+	}
+
+	std::span<const std::uint8_t> advance(std::span<const std::uint8_t>& message, std::size_t n) {
+		if (message.size() < n) {
+			MQ_XERROR("Message length was invalid to deserialise field");
+		}
+		auto left_behind = message.first(n); // Gets a subview of the first n bytes
+		message = message.subspan(n);		 // Gets a subview of anything after n
+		return left_behind;
+	}
+
+	WlDisplay& get_display() {
+		return std::get<WlDisplay>(objects.at(1));
 	}
 
 	// destroy calls handle_destroy(), then tells the server to remove this client
@@ -275,7 +297,7 @@ class Client {
 	}
 
 	template<typename T>
-	T& add_object(std::uint32_t id) {
+	T& add_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
 		auto [it, inserted] = objects.emplace(
 			id,
 			Interface {T {
@@ -283,7 +305,9 @@ class Client {
 				.id = id,
 			}});
 
-		assert(inserted && "Tried to insert an object that was already added");
+		if (!inserted) {
+            MQ_SXERROR(source, "Tried to insert an object {} that was already added", id);
+		}
 		return std::get<T>(it->second);
 	}
 
@@ -292,16 +316,25 @@ class Client {
 
 		// Tell wl_display that they can reuse this id, if they allocated it
 		if (id < server_id_start) {
-			std::get<WlDisplay>(objects.at(1)).delete_id(id);
+			get_display().delete_id(id);
 		}
+	}
+
+	void error(
+		std::uint32_t object_id,
+		WlDisplay::ErrorEnum code,
+		std::string message,
+		std::source_location source = std::source_location::current()) {
+
+        MQ_SERROR(source, "{}", message);
+		// Same as static casting to uint32
+		get_display().error(object_id, std::to_underlying(code), message);
+
+		disconnect_pending = true;
 	}
 
 	std::uint32_t next_id() {
 		return current_server_id++;
-	}
-
-	void disconnect_after_flushed() {
-		disconnect_pending = true;
 	}
 
 #ifdef MAYQUILL_ICE

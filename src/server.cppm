@@ -1,13 +1,13 @@
 module;
 #include <cassert>
 #include <cerrno>
+#include <mayquill/logger.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <mayquill/logger.h>
 export module mayquill:server;
-import :logger;
 export import :client;
+import :logger;
 import :wayland.wl_display;
 import :definitions;
 
@@ -38,7 +38,7 @@ class Server {
 		// Allocate the socket, set it to be non blocking
 		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
 		if (fd < 0) {
-			throw std::runtime_error(std::format("Failed to open socket at {}", directory));
+			MQ_XERRNO("Failed to open socket at {}", directory);
 		}
 
 		// Bind the socket to the address
@@ -47,17 +47,16 @@ class Server {
 
 		// Reason to cast: https://stackoverflow.com/a/57431271
 		if (bind(fd, (sockaddr*)&address, sizeof(address)) < 0) {
-			throw std::runtime_error(std::format("Failed to bind to socket at {}, {}", directory, std::strerror(errno)));
+			MQ_XERRNO("Failed to bind to socket at {}", directory);
 		}
 
 		// SOMAXCONN is just as many as the kernel can handle
 		if (listen(fd, SOMAXCONN) < 0) {
-			throw std::runtime_error(
-				std::format("Failed to listen to socket at {}, {}", directory, std::strerror(errno)));
+			MQ_XERRNO("Failed to listen to socket at {}", directory);
 		}
 
 		this->fd = fd;
-        MQ_DEBUG("Bound socket");
+		MQ_DEBUG("Bound socket");
 	}
 
 	void try_accept_clients() {
@@ -66,7 +65,7 @@ class Server {
 			int fd = accept4(this->fd, nullptr, nullptr, SOCK_NONBLOCK);
 			if (fd == -1) {
 				if (!(errno == EWOULDBLOCK)) {
-					throw std::runtime_error(std::format("Failed to accept client: {}", std::strerror(errno)));
+					MQ_ERRNO("Failed to accept client");
 				}
 
 				// Nothing to accept, exit the loop
@@ -80,7 +79,7 @@ class Server {
 			Client* client_ptr = client.get();
 			this->clients.push_back(std::move(client));
 			client_ptr->handle_init();
-			std::println("Accepted a new client");
+			MQ_DEBUG("Accepted a new client");
 		}
 	}
 
@@ -89,11 +88,16 @@ class Server {
 	 *  32 bit    | 16 bit | 16 bit                    | Message Size minus 64 bits
 	 */
 	void try_listen_requests() {
-		std::vector<Client*> disconnected_clients = {};
+		std::vector<Client*> clients_to_destroy = {};
 
 		for (auto& unique_client : this->clients) {
 			auto& client = *unique_client;
-			std::uint8_t buffer[128]; // (Remember, this is bytes) TODO 0 INIT
+
+			// Dont take inputs for clients due to disconnect
+			if (client.disconnect_pending)
+				continue;
+
+			std::uint8_t buffer[128];
 
 			while (true) {
 				// Useful link: https://stackoverflow.com/questions/32593697/understanding-the-msghdr-structure-from-sys-socket-h
@@ -115,25 +119,28 @@ class Server {
 
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
-					std::println("Client disconnected");
-					disconnected_clients.push_back(&client);
+					MQ_DEBUG("Client disconnected");
+					clients_to_destroy.push_back(&client);
 					break;
 				} else if (bytes_read == -1) {
 					if (errno == EWOULDBLOCK) {
 						break;
 					} else {
-						throw std::runtime_error(std::format("Failed to read from fd {}, {}", client.fd, std::strerror(errno)));
-						// potentially clean up client before this, also don't throw
+						MQ_ERRNO("Failed to read from fd {}", client.fd);
+						clients_to_destroy.push_back(&client);
+                        break;
 					}
 				}
 
 				// Check if the ancilliary data fit. We don't want to wait to read it in the next loop, because potentially,
-				// it could be part of this message that will be processed in this loop.
+				// it could be part of this message that will be processed in this loop, so disconnect the client
 				if (message_header.msg_flags & MSG_CTRUNC) {
-					throw std::runtime_error("Control message was truncated, couldn't fit into buffer");
+					client.error(1, WlDisplay::ErrorEnum::Implementation, "Control message was truncated, couldn't fit into buffer");
+                    // TODO WE LEAK ANY FDS WE DID RECEIVE HERE. Also, we may want to validate the number of FDs we receive is the number we expect, but it should only affect that client really
+					break;
 				}
 
-				std::println("Read {} bytes", bytes_read);
+				MQ_DEBUG("Read {} bytes", bytes_read);
 				client.request_data.insert(client.request_data.end(), buffer, buffer + bytes_read);
 
 				// PBUG: I have avoided macros in this, because I didn't understand how there could be alignment between the
@@ -150,7 +157,7 @@ class Server {
 						// CMSG_DATA just gives the first byte of the payload, which should be a packed int array of the fd ids
 						int* received_fds = reinterpret_cast<int*>(cmsg + 1); // Skip the header, pointer arithemtic will actually do cmsg + sizeof(cmsghdr) in human logic
 						client.request_fds.insert(client.request_fds.end(), received_fds, received_fds + number_fds);
-						std::println("Received {} fds", number_fds);
+						MQ_DEBUG("Received {} fds", number_fds);
 					}
 				}
 
@@ -159,41 +166,63 @@ class Server {
 					std::uint16_t message_size;
 					std::memcpy(&message_size, client.request_data.data() + 6, sizeof(std::uint16_t));
 
+					// Arbitrary message_size check, it of course needs to be atleast as large as the header (because it's part of the header)
+					// prevents looping if they say message_size is 0 (it can't be)
+					if (message_size < sizeof(Header) || message_size % 4 != 0) {
+						client.error(1,
+							WlDisplay::ErrorEnum::InvalidMethod,
+							std::format("Message size {} is invalid, it is either smaller than the header (8 bytes), "
+										"or not aligned to a 4 byte boundary (all argument sizes are multiples of 4)",
+								message_size));
+						break;
+					}
+
 					// The message has been fully received
 					if (client.request_data.size() >= message_size) {
 						// TODO, find an elegant move, this is copy
 						std::vector<std::uint8_t> message(client.request_data.begin(), client.request_data.begin() + message_size);
 						client.request_data.erase(client.request_data.begin(), client.request_data.begin() + message_size);
 						client.process_request(std::move(message));
+                        
+                        // If that previous call errors, make sure we don't potentially loop around again
+                        if (client.disconnect_pending) {
+                            break;
+                        }
 					} else {
 						break;
 					}
 				}
+
+				// Incase we do a client.error whilst parsing the inner while
+				if (client.disconnect_pending)
+					break;
 			}
 		}
 
-		for (auto client : disconnected_clients) {
+		for (auto client : clients_to_destroy) {
 			client->destroy();
 		}
 	}
 
 	void try_flush_events() {
-		std::vector<Client*> disconnected_clients;
+		std::vector<Client*> clients_to_destroy;
 
 		for (auto& client : clients) {
 			if (!client->flush_events()) {
-                // Send failed, consider it disconnected
-				disconnected_clients.push_back(client.get());
+				// Send failed, consider it permenantly disconnected (ie. the socket is just gone)
+				// So don't set disconnect_pending, just destroy now as there's no hope for it
+				clients_to_destroy.push_back(client.get());
 				continue;
 			}
 
 			// If the client wants to kill itself, do so after it has no more data to send
+			// .error() sets disconnect_pending
 			if (client->disconnect_pending && client->event_data.empty()) {
-				disconnected_clients.push_back(client.get());
+				clients_to_destroy.push_back(client.get());
 			}
 		}
 
-		for (Client* client : disconnected_clients) {
+		for (Client* client : clients_to_destroy) {
 			client->destroy();
 		}
 	}
@@ -205,7 +234,7 @@ class Server {
 				return;
 			}
 		}
-		throw std::runtime_error("Tried to destroy a nonexistent client");
+		MQ_XERROR("Tried to destroy a nonexistent client");
 	}
 };
 } // namespace mayquill

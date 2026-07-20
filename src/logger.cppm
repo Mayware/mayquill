@@ -1,3 +1,5 @@
+module;
+#include <cerrno>
 export module mayquill:logger;
 import std;
 
@@ -40,29 +42,39 @@ constexpr std::source_location here(std::source_location source = std::source_lo
 	return source;
 }
 
-template<LogLevel Level, typename... Args>
+template<LogLevel Level, bool ShouldErrno, bool ShouldKill, typename... Args>
 void log_impl(std::source_location source, std::format_string<Args...> format, Args&&... args) {
 	std::string message = std::format(format, std::forward<Args>(args)...);
 #ifdef MAYQUILL_ICE
-	std::println("{} [{}:{}] {}", stringify_tag<Level>(), std::filesystem::path(source.file_name()).filename().display_string(), source.line(), message);
+	std::string final_message = std::format("{} [{}:{}] {}", stringify_tag<Level>(), std::filesystem::path(source.file_name()).filename().display_string(), source.line(), message);
+    if constexpr (ShouldErrno) {
+        final_message = std::format("{}: {}", final_message, std::strerror(errno));
+    }
+	if constexpr (ShouldKill) {
+		throw std::runtime_error(final_message);
+	}
+	std::println("{}", final_message);
 #endif
 }
 // Overloads the () operator on variables, so they can be used *like* functions
 // They are not actually functions, just variables where you can use the () operator lmao
-template<LogLevel Level>
+template<LogLevel Level, bool ShouldErrno, bool ShouldKill>
 struct Generator {
 	// && means either an lvalue or rvalue here, not just a temporary
 	// https://old.reddit.com/r/cpp_questions/comments/1kngj5i/why_do_some_devs_use_for_variadic_template/msi31nv/
 	template<typename... Args>
 	void operator()(std::source_location source, std::format_string<Args...> format, Args&&... args) const {
-		log_impl<Level>(source, format, std::forward<Args>(args)...);
+		log_impl<Level, ShouldErrno, ShouldKill>(source, format, std::forward<Args>(args)...);
 	}
 };
 } // namespace log
 
 using namespace log;
-constexpr Generator<LogLevel::Debug> debug {};
-constexpr Generator<LogLevel::Info> info {};
-constexpr Generator<LogLevel::Warning> warning {};
-constexpr Generator<LogLevel::Error> error {};
+constexpr Generator<LogLevel::Debug, false, false> debug {};
+constexpr Generator<LogLevel::Info, false, false> info {};
+constexpr Generator<LogLevel::Warning, false, false> warning {};
+constexpr Generator<LogLevel::Error, false, false> error {};
+constexpr Generator<LogLevel::Error, true, false> errorno {};
+constexpr Generator<LogLevel::Error, false, true> xerror {};
+constexpr Generator<LogLevel::Error, true, true> xerrorno {};
 } // namespace mayquill

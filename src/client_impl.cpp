@@ -11,7 +11,12 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 	std::memcpy(&header, message.data(), sizeof(Header));
 	std::println("Object ID: {}", header.object_id);
 
-	Interface& object = this->objects.at(header.object_id); // TODO sec
+	auto it = this->objects.find(header.object_id);
+	if (it == this->objects.end()) {
+		this->error(1, WlDisplay::ErrorEnum::InvalidObject, std::format("Attempted to send a request for object id {}, which doesn't exist!", header.object_id));
+		return;
+	}
+	Interface& object = it->second;
 
 	std::visit([&](auto& interface) {
 		// Get the actual type
@@ -31,20 +36,28 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 				// but this is something I want to come back to
 				if (header.opcode == i) {
 					using Alternative = std::variant_alternative_t<i, typename T::Request>;
-					auto alternative = deserialise_struct<Alternative>(std::move(message));
+					Alternative alternative;
+					// Deserialise struct throws if it's invalid, so just catch and convert to a client error
+					try {
+						alternative = deserialise_struct<Alternative>(std::span(message));
+					} catch (const std::runtime_error& e) {
+						this->error(header.object_id, WlDisplay::ErrorEnum::InvalidMethod, e.what());
+						return;
+					}
 					interface.handle(alternative);
-                    static constexpr auto wl_declaration = std::meta::extract<WlDeclaration>(
-                        // Ask for the reflections on the original type, not on the alias
-                        std::meta::annotations_of(std::meta::dealias(^^Alternative))[0]
-                    );
-                    if constexpr (wl_declaration == WlDeclaration::Destructor) {
-                        interface.destroy();
-                    }
+					static constexpr auto wl_declaration = std::meta::extract<WlDeclaration>(
+						// Ask for the reflections on the original type, not on the alias
+						std::meta::annotations_of(std::meta::dealias(^^Alternative))[0]);
+					if constexpr (wl_declaration == WlDeclaration::Destructor) {
+						interface.destroy();
+					}
 					return;
 				}
 			}
 #endif
-			std::println("No opcode matched: {}", header.opcode);
+			this->error(header.object_id, WlDisplay::ErrorEnum::InvalidMethod, std::format("No opcode matches {}", header.opcode));
+		} else {
+			this->error(header.object_id, WlDisplay::ErrorEnum::InvalidMethod, std::format("Attempted to call opcode {} on an interface with no requests", header.opcode));
 		}
 	},
 		object);
@@ -57,9 +70,14 @@ void Client::handle_destroy() {}
 void Client::handle_init() {}
 
 void Client::destroy() {
-    handle_destroy();
-    server.remove_client(this);
+	for (auto& [id, variant] : this->objects) {
+		std::visit([](auto& object) {
+			object.destroy();
+		},
+			variant);
+	}
+
+	handle_destroy();
+	server.remove_client(this);
 }
-
-
 }; // namespace mayquill
