@@ -11,7 +11,7 @@ import :definitions;
 import :interface;
 import :logger;
 
-static constexpr std::uint32_t server_id_start = 0xff000000u;
+#define FIRST_SERVER_ID 0xff000000u
 
 export namespace mayquill {
 class Server;
@@ -165,24 +165,27 @@ class Client {
 	template<WlType Wl, typename T>
 	T deserialise_field(std::span<const std::uint8_t>& message) {
 
-		if constexpr (Wl == WlType::NullableObject) {
+		if constexpr (Wl == WlType::Int ||
+					  Wl == WlType::Uint ||
+					  Wl == WlType::Object ||
+					  Wl == WlType::NullableObject ||
+					  Wl == WlType::NewId ||
+					  Wl == WlType::Enum) {
 			auto bytes = advance(message, sizeof(std::uint32_t));
-			std::uint32_t value; // Explicitly use uint32_t, because T would be an optional<uint32_t>
+			std::uint32_t value;
 			std::memcpy(&value, bytes.data(), sizeof(value));
-			if (value == 0) {
-				return std::nullopt;
+			if constexpr (Wl == WlType::NewId) {
+				if (this->objects.contains(value) || value == 0 || FIRST_SERVER_ID <= value) {
+					// Technically they should be densly packed, but it doesn't affect us, and checking would be relatively expensive
+					MQ_XERROR("Invalid new_id provided, it was either in range of the server ids, or already used");
+				}
+			} else if constexpr (Wl == WlType::NullableObject) {
+				if (value == 0) {
+					return std::nullopt;
+				}
 			}
-			return value;
-		} else if constexpr (Wl == WlType::Int ||
-							 Wl == WlType::Uint ||
-							 Wl == WlType::Object ||
-							 Wl == WlType::NewId ||
-							 Wl == WlType::Enum) {
-
-			auto bytes = advance(message, sizeof(T));
-			T value;
-			std::memcpy(&value, bytes.data(), sizeof(value));
-			return value;
+			// Static cast done for the enum type
+			return static_cast<T>(value);
 		} else if constexpr (Wl == WlType::Fixed) {
 			auto bytes = advance(message, sizeof(std::uint32_t));
 			std::int32_t raw;
@@ -280,7 +283,7 @@ class Client {
 	void handle_destroy();
 	void handle_init();
 
-	std::uint32_t current_server_id = server_id_start;
+	std::uint32_t current_server_id = FIRST_SERVER_ID;
 	bool disconnect_pending = false;
 
   public:
@@ -306,7 +309,7 @@ class Client {
 			}});
 
 		if (!inserted) {
-            MQ_SXERROR(source, "Tried to insert an object {} that was already added", id);
+			MQ_SXERROR(source, "Tried to insert an object {} that was already added", id);
 		}
 		return std::get<T>(it->second);
 	}
@@ -315,7 +318,7 @@ class Client {
 		objects.erase(id);
 
 		// Tell wl_display that they can reuse this id, if they allocated it
-		if (id < server_id_start) {
+		if (id < FIRST_SERVER_ID) {
 			get_display().delete_id(id);
 		}
 	}
@@ -326,7 +329,7 @@ class Client {
 		std::string message,
 		std::source_location source = std::source_location::current()) {
 
-        MQ_SERROR(source, "{}", message);
+		MQ_SERROR(source, "{}", message);
 		// Same as static casting to uint32
 		get_display().error(object_id, std::to_underlying(code), message);
 
