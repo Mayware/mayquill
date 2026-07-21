@@ -369,7 +369,8 @@ class Client {
 		MQ_DEBUG("Removed object id {}", id);
 
 		// Tell wl_display that they can reuse this id, if they allocated it
-		if (id < FIRST_SERVER_ID) {
+        // Obviously if we removed the display, don't emit that event because we can't
+		if (id < FIRST_SERVER_ID && id != 1) {
 			get_display().delete_id(id);
 			MQ_DEBUG("Told client it can reuse id {}", id);
 		}

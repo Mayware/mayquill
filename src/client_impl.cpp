@@ -72,13 +72,18 @@ void Client::handle_destroy() {}
 void Client::handle_init() {}
 
 void Client::destroy() {
-	for (auto& [id, variant] : this->objects) {
+	// No iterator, so we don't invalidate it
+	while (objects.size() > 1) { // 1, because we don't destroy the display here
+		// Anything but the wl_display, we'll need to delete that last
+		auto it = std::ranges::find_if(objects, [](const auto& slot) {
+			return slot.first != 1;
+		});
 		std::visit([](auto& object) {
 			object.destroy();
 		},
-			variant);
+			it->second);
 	}
-
+    get_display().destroy();
 	handle_destroy();
 	server.remove_client(this);
 }
