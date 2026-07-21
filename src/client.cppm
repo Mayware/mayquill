@@ -2,6 +2,7 @@ module;
 #include "mayquill/logger.h"
 #include <cassert>
 #include <cerrno>
+#include <exception>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -364,27 +365,37 @@ class Client {
 		return std::get<T>(it->second);
 	}
 
+    template<typename T>
+    T& get_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
+        try {
+            return std::get<T>(objects.at(id));
+        } catch (std::exception e) {
+            MQ_SXERROR(source, "Tried to get object {}, but failed: {}", id, e.what());
+        }
+    }
+
 	void remove_object(std::uint32_t id) {
 		objects.erase(id);
 		MQ_DEBUG("Removed object id {}", id);
 
 		// Tell wl_display that they can reuse this id, if they allocated it
-        // Obviously if we removed the display, don't emit that event because we can't
+		// Obviously if we removed the display, don't emit that event because we can't
 		if (id < FIRST_SERVER_ID && id != 1) {
 			get_display().delete_id(id);
 			MQ_DEBUG("Told client it can reuse id {}", id);
 		}
 	}
 
+	template<typename E>
+		requires std::is_enum_v<E>
 	void error(
 		std::uint32_t object_id,
-		WlDisplay::ErrorEnum code,
+		E code,
 		std::string message,
 		std::source_location source = std::source_location::current()) {
 
 		MQ_SERROR(source, "{}", message);
-		// Same as static casting to uint32
-		get_display().error(object_id, std::to_underlying(code), message);
+		get_display().error(object_id, static_cast<std::uint32_t>(code), message);
 
 		disconnect_pending = true;
 	}

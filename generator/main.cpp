@@ -108,7 +108,8 @@ int main() {
 		// Write the using Interface
 		content += "\nnamespace mayquill {\n"
 				   "using Interface = std::variant<";
-		for (auto& protocol : protocols) {
+		for (int i; i < protocols.size(); ++i) {
+            auto& protocol = protocols[i];
 			for (std::size_t i = 0; i < protocol.interfaces.size(); ++i) {
 				content += parser::snake_to_pascal(protocol.interfaces[i].name);
 				if (i == protocol.interfaces.size() - 1) {
@@ -116,6 +117,9 @@ int main() {
 				}
 				content += ", ";
 			}
+            if (i != protocols.size() - 1) {
+                content += ", ";
+            }
 		}
 		content += ">;\n};";
 		write_file("interface.cppm", std::move(content));
@@ -222,8 +226,10 @@ int main() {
 				std::string content = "";
 				add_header(content);
 				content += "module;\n"
+                           "#include <mayquill/logger.h>\n"
 						   "#include <cassert>\n"
 						   "module mayquill;\n"
+                           "import :logger;\n"
 						   "import :client;\n\n"
 						   "namespace mayquill {\n";
 
@@ -264,7 +270,7 @@ int main() {
 						"// Default implementation, linker will prefer the implementation you provide, since we've marked this one as weak (absolutely ratioed)\n"
 						"[[gnu::weak]]\n"
 						"void {}::handle(Request request) {{\n"
-						"    std::println(\"{}::handle(Request request) is currently unimplemented, request will be ignored\");\n"
+						"    MQ_WARN(\"{}::handle(Request request) is currently unimplemented, request will be ignored\");\n"
 						"}}\n",
 						struct_name, struct_name, struct_name);
 				}

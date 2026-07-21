@@ -15,7 +15,7 @@ export namespace mayquill {
 namespace log {
 enum class LogLevel {
 	Error,
-	Warning,
+	Warn,
 	Info,
 	Debug,
 };
@@ -24,8 +24,8 @@ template<LogLevel Level>
 constexpr std::string_view stringify_tag() {
 	if constexpr (Level == LogLevel::Error) {
 		return "\033[31m[Error]\033[0m";
-	} else if constexpr (Level == LogLevel::Warning) {
-		return "\033[33m[Warning]\033[0m";
+	} else if constexpr (Level == LogLevel::Warn) {
+		return "\033[33m[Warn]\033[0m";
 	} else if constexpr (Level == LogLevel::Info) {
 		return "\033[36m[Info]\033[0m";
 	} else if constexpr (Level == LogLevel::Debug) {
@@ -47,9 +47,9 @@ void log_impl(std::source_location source, std::format_string<Args...> format, A
 	std::string message = std::format(format, std::forward<Args>(args)...);
 #ifdef MAYQUILL_ICE
 	std::string final_message = std::format("{} [{}:{}] {}", stringify_tag<Level>(), std::filesystem::path(source.file_name()).filename().display_string(), source.line(), message);
-    if constexpr (ShouldErrno) {
-        final_message = std::format("{}: {}", final_message, std::strerror(errno));
-    }
+	if constexpr (ShouldErrno) {
+		final_message = std::format("{}: {}", final_message, std::strerror(errno));
+	}
 	if constexpr (ShouldKill) {
 		throw std::runtime_error(final_message);
 	}
@@ -72,9 +72,14 @@ struct Generator {
 using namespace log;
 constexpr Generator<LogLevel::Debug, false, false> debug {};
 constexpr Generator<LogLevel::Info, false, false> info {};
-constexpr Generator<LogLevel::Warning, false, false> warning {};
+constexpr Generator<LogLevel::Warn, false, false> warn {};
 constexpr Generator<LogLevel::Error, false, false> error {};
 constexpr Generator<LogLevel::Error, true, false> errorno {};
 constexpr Generator<LogLevel::Error, false, true> xerror {};
 constexpr Generator<LogLevel::Error, true, true> xerrorno {};
+
+template<typename... Args>
+std::string combo_errno(std::format_string<Args...> format, Args&&... args) {
+	return std::format("{}: {}", std::format(format, std::forward<Args>(args)...), std::strerror(errno));
+}
 } // namespace mayquill
