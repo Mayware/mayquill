@@ -75,7 +75,7 @@ class Server {
 			// New client accepted
 			auto client = std::unique_ptr<Client>(new Client(*this, fd));
 			// Add default display object
-			client->add_object<WlDisplay>(1);
+			client->add_object<WlDisplay, void>(1);
 			Client* client_ptr = client.get();
 			this->clients.push_back(std::move(client));
 			client_ptr->handle_init();

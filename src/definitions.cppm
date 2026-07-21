@@ -1,7 +1,12 @@
-module mayquill:definitions;
+export module mayquill:definitions;
 import std;
 
 namespace mayquill {
+export struct Key {
+	std::uint32_t id;
+	std::uint32_t unique;
+};
+
 enum class WlType {
 	Int,
 	Uint,

@@ -12,12 +12,13 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 	Header header;
 	std::memcpy(&header, message.data(), sizeof(Header));
 
+	// Not using get_object here, because we need the full variant to be returned
 	auto it = this->objects.find(header.object_id);
 	if (it == this->objects.end()) {
 		this->error(1, WlDisplay::ErrorEnum::InvalidObject, std::format("Attempted to send a request for object id {}, which doesn't exist!", header.object_id));
 		return;
 	}
-	Interface& object = it->second;
+	Interface& object = std::get<1>(it->second);
 
 	std::visit([&](auto& interface) {
 		// Get the actual type
@@ -81,9 +82,9 @@ void Client::destroy() {
 		std::visit([](auto& object) {
 			object.destroy();
 		},
-			it->second);
+			std::get<1>(it->second));
 	}
-    get_display().destroy();
+	get_display().destroy();
 	handle_destroy();
 	server.remove_client(this);
 }

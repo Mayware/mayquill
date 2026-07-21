@@ -22,7 +22,8 @@ class Client {
 
   private:
 	Server& server;
-	std::unordered_map<std::uint32_t, Interface> objects; // Index is the objectid, 0th index is wasted
+	// Index is the objectid, the 1st value is a unique id. 0th index is wasted
+	std::unordered_map<std::uint32_t, std::tuple<std::uint32_t, Interface>> objects;
 
 	// Part of outgoing messages (events)
 	std::vector<std::uint8_t> event_data;
@@ -274,7 +275,7 @@ class Client {
 	}
 
 	WlDisplay& get_display() {
-		return std::get<WlDisplay>(objects.at(1));
+		return std::get<WlDisplay>(std::get<1>(objects.at(1)));
 	}
 
 	// destroy calls handle_destroy(), then tells the server to remove this client
@@ -349,40 +350,63 @@ class Client {
 		}
 	}
 
-	template<typename T>
-	T& add_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
+	template<typename T, typename D>
+	std::pair<Key, T&> add_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
+		static std::uint32_t unique_count = 0;
+		auto key = Key {.id = id, .unique = ++unique_count};
 		auto [it, inserted] = objects.emplace(
-			id,
-			Interface {T {
-				.client = *this,
-				.id = id,
-			}});
+			key.id,
+			std::make_tuple(
+				key.unique,
+				Interface {T {
+					.client = *this,
+					.keyd = key,
+					.user_data = {
+						nullptr,
+						[](void* user_data) {
+							if constexpr (!std::is_same_v<D, void>) {
+								delete static_cast<D*>(user_data);
+							}
+						},
+					},
+				}}));
 
 		if (!inserted) {
-			MQ_SXERROR(source, "Tried to insert an object {} that was already added", id);
+			MQ_SXERROR(source, "Tried to insert an object {} that was already added", key.id);
 		}
 		MQ_DEBUG("Added object id {}", id);
-		return std::get<T>(it->second);
+		return {key, std::get<T>(std::get<1>(it->second))};
 	}
 
-    template<typename T>
-    T& get_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
-        try {
-            return std::get<T>(objects.at(id));
-        } catch (std::exception e) {
-            MQ_SXERROR(source, "Tried to get object {}, but failed: {}", id, e.what());
-        }
-    }
+	template<typename T>
+	std::optional<T&> get_object(Key key, std::source_location source = std::source_location::current()) {
+		auto it = objects.find(key.id);
+		if (it == objects.end())
+			return std::nullopt;
+		auto& [unique, object] = it->second;
+		if (unique == key.unique)
+			return std::get<T>(object);
+		else
+			return std::nullopt;
+	}
 
-	void remove_object(std::uint32_t id) {
-		objects.erase(id);
-		MQ_DEBUG("Removed object id {}", id);
+	void remove_object(Key key, std::source_location source = std::source_location::current()) {
+		MQ_DEBUG("Removed object id {}", key.id);
+		if constexpr (log::level < log::LogLevel::Error) {
+			auto pair = objects.extract(key.id);
+			if (pair.empty())
+				MQ_SXERROR(source, "Tried to remove an object, which did not exist!");
+			if (std::get<0>(pair.mapped()) != key.unique)
+				MQ_SXERROR(source, "Tried to remove an object, but the key's unique value was not the same! {}", key.id);
+		} else {
+			objects.erase(key.id);
+		}
 
 		// Tell wl_display that they can reuse this id, if they allocated it
 		// Obviously if we removed the display, don't emit that event because we can't
-		if (id < FIRST_SERVER_ID && id != 1) {
-			get_display().delete_id(id);
-			MQ_DEBUG("Told client it can reuse id {}", id);
+		if (key.id < FIRST_SERVER_ID && key.id != 1) {
+			get_display().delete_id(key.id);
+			MQ_DEBUG("Told client it can reuse id {}", key.id);
 		}
 	}
 

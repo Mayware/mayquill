@@ -80,6 +80,7 @@ int main() {
 		add_header(content);
 		content += "export module mayquill;\n"
 				   "export import :server;\n"
+				   "export import :definitions;\n"
 				   "export import :logger;\n\n";
 
 		for (auto& protocol : protocols) {
@@ -150,8 +151,8 @@ int main() {
                                        "    static constexpr std::string_view interface = \"{}\";\n"
 									   "    static constexpr std::uint32_t version = {};\n\n"
 									   "    Client& client;\n"
-									   "    std::uint32_t id;\n"
-									   "    void* user_data;\n",
+									   "    Key keyd;\n"
+									   "    std::unique_ptr<void, void (*)(void*)>  user_data;\n",
 					struct_name, interface.name, interface.version);
 
 				// Write the custom enums the interface may define
@@ -248,7 +249,7 @@ int main() {
 					content += ") {";
 
 					// Parameters can shadow the function name, so use full type specifier
-					auto definition = std::format("    client.process_event<^^{}::{}, {}>(this->id ", struct_name, event.name, iter);
+					auto definition = std::format("    client.process_event<^^{}::{}, {}>(this->keyd.id ", struct_name, event.name, iter);
 					for (auto& argument : event.arguments) {
 						definition += std::format(", {}", argument.name);
 					}
@@ -260,7 +261,7 @@ int main() {
 				content += std::format("void {}::destroy() {{\n"
 									   "   handle_destroy();\n"
 									   "   assert(user_data == nullptr && \"{} did not clean up user data before destruction - was not nullptr\");\n"
-									   "   client.remove_object(id);\n"
+									   "   client.remove_object(keyd);\n"
 									   "}}\n\n",
 					struct_name, struct_name);
 
