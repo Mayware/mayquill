@@ -286,6 +286,55 @@ class Client {
 	std::uint32_t current_server_id = FIRST_SERVER_ID;
 	bool disconnect_pending = false;
 
+	template<WlType Wl, typename T>
+	std::string log_field(const T& value) {
+#ifdef MAYQUILL_ICE
+		if constexpr (Wl == WlType::NullableObject || Wl == WlType::NullableString) {
+			return value ? std::format("{}", *value) : "null";
+		} else if constexpr (Wl == WlType::Array) {
+			return std::format("[{} bytes]", value.size());
+		} else if constexpr (Wl == WlType::Enum) {
+			static constexpr auto enumerators = std::define_static_array(std::meta::enumerators_of(^^T));
+			template for (constexpr auto i : std::views::iota(0uz, enumerators.size())) {
+				if (value == std::meta::extract<T>(enumerators[i])) {
+					return std::format("{}:{}", std::meta::identifier_of(enumerators[i]), std::to_underlying(value));
+				}
+			}
+			return std::format("Unknown?:{}", std::to_underlying(value));
+		} else {
+			return std::format("{}", value);
+		}
+#endif
+	}
+
+	template<typename T>
+	std::string log_wl_struct(const T& wl_struct, std::uint32_t id, std::uint32_t opcode) {
+#ifdef MAYQUILL_ICE
+		static constexpr auto fields = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
+		static constexpr auto wl_types = get_wl_types(fields);
+		std::string message = std::format("{}.{}[Id{}, Op{}] {{ ", std::meta::identifier_of(std::meta::parent_of(^^T)), std::meta::identifier_of(^^T), id, opcode);
+
+		template for (constexpr auto i : std::views::iota(0uz, fields.size())) {
+			message += std::format("{}{}={}", i == 0 ? "" : ", ", std::meta::identifier_of(fields[i]), log_field<wl_types[i]>(wl_struct.[:fields[i]:]));
+		}
+		return message + " }";
+#endif
+	}
+
+#ifdef MAYQUILL_ICE
+	template<std::meta::info Fn, std::uint16_t Opcode, typename... Args>
+	std::string log_wl_function(std::uint32_t id, const Args&... args) {
+		static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));
+		static constexpr auto wl_types = get_wl_types(parameters);
+		std::string message = std::format("{}.{}[Id{}, Op{}] {{ ", std::meta::identifier_of(std::meta::parent_of(Fn)), std::meta::identifier_of(Fn), id, Opcode);
+
+		template for (constexpr auto i : std::views::iota(0uz, parameters.size())) {
+			message += std::format("{}{}={}", i == 0 ? "" : ", ", std::meta::identifier_of(parameters[i]), log_field<wl_types[i]>(args...[i]));
+		}
+		return message + " }";
+	}
+#endif
+
   public:
 	int fd;
 
@@ -311,15 +360,18 @@ class Client {
 		if (!inserted) {
 			MQ_SXERROR(source, "Tried to insert an object {} that was already added", id);
 		}
+		MQ_DEBUG("Added object id {}", id);
 		return std::get<T>(it->second);
 	}
 
 	void remove_object(std::uint32_t id) {
 		objects.erase(id);
+		MQ_DEBUG("Removed object id {}", id);
 
 		// Tell wl_display that they can reuse this id, if they allocated it
 		if (id < FIRST_SERVER_ID) {
 			get_display().delete_id(id);
+			MQ_DEBUG("Told client it can reuse id {}", id);
 		}
 	}
 
@@ -345,6 +397,7 @@ class Client {
 	void process_event(std::uint32_t object_id, const Args&... args) {
 		static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));
 		static constexpr auto wl_types = get_wl_types(parameters);
+		MQ_DEBUG("Event {}", log_wl_function<Fn, Opcode>(object_id, args...));
 
 		auto offset = event_data.size();
 		event_data.resize(offset + sizeof(Header)); // Add reserved space for the header

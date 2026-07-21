@@ -1,3 +1,5 @@
+module;
+#include "mayquill/logger.h"
 module mayquill;
 import std;
 import :client;
@@ -9,7 +11,6 @@ namespace mayquill {
 void Client::process_request(std::vector<std::uint8_t> message) {
 	Header header;
 	std::memcpy(&header, message.data(), sizeof(Header));
-	std::println("Object ID: {}", header.object_id);
 
 	auto it = this->objects.find(header.object_id);
 	if (it == this->objects.end()) {
@@ -44,6 +45,7 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 						this->error(header.object_id, WlDisplay::ErrorEnum::InvalidMethod, e.what());
 						return;
 					}
+					MQ_DEBUG("Request {}", log_wl_struct(alternative, header.object_id, header.opcode));
 					interface.handle(alternative);
 					static constexpr auto wl_declaration = std::meta::extract<WlDeclaration>(
 						// Ask for the reflections on the original type, not on the alias
