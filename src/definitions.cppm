@@ -70,3 +70,16 @@ template<> constexpr bool enable_bitfield_operators<DndActionEnum> = true;
 * General template specialisation syntax, to specify that for that T, enable_bitfield_operator is set to true
 */
 } // namespace mayquill
+
+// https://www.cppstories.com/2022/custom-stdformat-cpp20/
+template<>
+struct std::formatter<mayquill::Key> {
+	constexpr auto parse(std::format_parse_context& ctx) {
+		return ctx.begin(); // no custom format specs supported
+	}
+
+	auto format(const mayquill::Key& key, std::format_context& ctx) const {
+		return std::format_to(ctx.out(), "Key{{{}[{}]}}", key.id, key.unique);
+	}
+};
+

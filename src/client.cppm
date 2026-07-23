@@ -350,8 +350,9 @@ class Client {
 		}
 	}
 
-	template<typename T, typename D>
-	std::pair<Key, T&> add_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
+	// Nullptr omits the userdata arg
+	template<typename T, typename D = std::nullptr_t>
+	std::pair<Key, T&> add_object(std::uint32_t id, std::unique_ptr<D> user_data = nullptr, std::source_location source = std::source_location::current()) {
 		static std::uint32_t unique_count = 0;
 		auto key = Key {.id = id, .unique = ++unique_count};
 		auto [it, inserted] = objects.emplace(
@@ -362,9 +363,11 @@ class Client {
 					.client = *this,
 					.keyd = key,
 					.user_data = {
-						nullptr,
+						// Ideally, I wanted to keep the signature such that you construct it in the signature without make_unique, then it's actually
+						// constructed here, directly on the heap. But I don't think I can avoid the stack construction if I do that, hence taking a unique ptr instead.
+						user_data.release(),
 						[](void* user_data) {
-							if constexpr (!std::is_same_v<D, void>) {
+							if constexpr (!std::is_same_v<D, std::nullptr_t>) {
 								delete static_cast<D*>(user_data);
 							}
 						},
@@ -379,15 +382,22 @@ class Client {
 	}
 
 	template<typename T>
-	std::optional<T&> get_object(Key key, std::source_location source = std::source_location::current()) {
+	T& get_object(Key key, std::source_location source = std::source_location::current()) {
 		auto it = objects.find(key.id);
 		if (it == objects.end())
-			return std::nullopt;
+			MQ_SXERROR(source, "Key was not found in the array {}", key);
 		auto& [unique, object] = it->second;
 		if (unique == key.unique)
 			return std::get<T>(object);
 		else
-			return std::nullopt;
+			MQ_SXERROR(source, "Key was found, but unique did not match: {}: {}", unique, key);
+	}
+
+	Key get_key(std::uint32_t id, std::source_location source = std::source_location::current()) {
+		auto it = objects.find(id);
+		if (it == objects.end())
+			MQ_SXERROR(source, "Id was not found in the array {}", id);
+		return Key {.id = id, .unique = std::get<0>(it->second)};
 	}
 
 	void remove_object(Key key, std::source_location source = std::source_location::current()) {

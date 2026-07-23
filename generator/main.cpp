@@ -228,7 +228,7 @@ int main() {
 				add_header(content);
 				content += "module;\n"
                            "#include <mayquill/logger.h>\n"
-						   "#include <cassert>\n"
+						   // "#include <cassert>\n"
 						   "module mayquill;\n"
                            "import :logger;\n"
 						   "import :client;\n\n"
@@ -260,7 +260,7 @@ int main() {
 
 				content += std::format("void {}::destroy() {{\n"
 									   "   handle_destroy();\n"
-									   "   assert(user_data == nullptr && \"{} did not clean up user data before destruction - was not nullptr\");\n"
+									   // "   assert(user_data == nullptr && \"{} did not clean up user data before destruction - was not nullptr\");\n"
 									   "   client.remove_object(keyd);\n"
 									   "}}\n\n",
 					struct_name, struct_name);
