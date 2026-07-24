@@ -186,12 +186,18 @@ bool get_bitfield(const pugi::xml_node& node) {
 	return bitfield ? bitfield.as_bool() : false;
 }
 
-std::string get_pascal_name(const pugi::xml_node& node) {
-	return snake_to_pascal(std::move(node.attribute("name").as_string()));
+std::string get_name(const pugi::xml_node& node) {
+    std::string name = node.attribute("name").as_string();
+	// Spec is retarded and sometimes uses numbers as the name, so we need to prefix it to make it valid
+	// Other keywords are also used, so do the same
+	if (std::isdigit(name.front()) || name == "namespace") {
+		name.insert(name.begin(), '_'); // Prefix it with _ if so
+	}
+    return name;
 }
 
-std::string get_name(const pugi::xml_node& node) {
-	return node.attribute("name").as_string();
+std::string get_pascal_name(const pugi::xml_node& node) {
+	return snake_to_pascal(std::move(get_name(node)));
 }
 
 std::int32_t get_entry_value(const pugi::xml_node& node) {
@@ -212,7 +218,6 @@ Declaration get_declaration(const pugi::xml_node& node, std::vector<std::string>
 	};
 
 	for (pugi::xml_node node : node.children("arg")) {
-
 		// Explicit exception for when new_id type does not have the interface attribute.
 		// In this instance, this one arg expands into three: string, uint, and new_id (regular)
 		// The other regular convert_type call will add the new_id arg. Yeah, it's pretty retarded,
@@ -280,10 +285,11 @@ Enum get_enum(const pugi::xml_node& node) {
 	return enum_ret;
 }
 
-std::vector<Protocol> get_protocols() {
+std::vector<Protocol> get_protocols(char* spec_path) {
 	std::vector<Protocol> protocols;
 
-	for (const auto& entry : std::filesystem::directory_iterator("./spec")) {
+    std::println("Target path: {}", spec_path);
+	for (const auto& entry : std::filesystem::directory_iterator(spec_path)) {
 		pugi::xml_document doc;
 		pugi::xml_parse_result result = doc.load_file(entry.path().c_str());
 		if (!result) {

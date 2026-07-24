@@ -1,46 +1,6 @@
 import std;
 import parser;
 
-// // Prepends a prefix (shocked emoji) to the start of each line
-// std::string prepend(std::string target, const std::string& prefix) {
-// 	target.insert(0, prefix);
-
-// 	size_t pos = target.find('\n');
-
-// 	while (pos != std::string::npos) {
-// 		// Don't insert it after the last newline
-// 		if (pos + 1 < target.size()) {
-// 			target.insert(pos + 1, prefix);
-// 		}
-
-// 		pos = target.find('\n', pos + prefix.size() + 1);
-// 	}
-
-// 	return target;
-// }
-
-// // Trims all leading spaces, tabs from the start of each line.
-// std::string trim(std::string target) {
-// 	size_t start = 0;
-
-// 	while (start < target.size()) {
-// 		auto end = start;
-
-// 		while (end < target.size() && (target[end] == ' ' || target[end] == '\t')) {
-// 			++end;
-// 		}
-// 		target.erase(start, end - start);
-
-// 		size_t newline_pos = target.find('\n', start);
-// 		// We've done every line
-// 		if (newline_pos == std::string::npos) {
-// 			break;
-// 		}
-// 		start = newline_pos + 1;
-// 	}
-// 	return target;
-// }
-
 std::string discriminate_clang(std::string_view content) {
 	return std::format("\n#ifdef MAYQUILL_ICE\n{}\n#endif\n", content);
 }
@@ -71,8 +31,12 @@ void add_since(std::string& content, std::uint32_t since) {
 	content += std::format("        static constexpr since = {};\n", since);
 }
 
-int main() {
-	auto protocols = parser::get_protocols();
+int main(int argc, char* argv[]) {
+	if (argc < 2 || std::strcmp(argv[1], "") == false) {
+		std::println("[HELP] Provide folder for the spec files as the arg");
+		return 1;
+	}
+	auto protocols = parser::get_protocols(argv[1]);
 
 	// Write the primary mayquill interface
 	{
@@ -110,7 +74,7 @@ int main() {
 		content += "\nnamespace mayquill {\n"
 				   "using Interface = std::variant<";
 		for (int i; i < protocols.size(); ++i) {
-            auto& protocol = protocols[i];
+			auto& protocol = protocols[i];
 			for (std::size_t i = 0; i < protocol.interfaces.size(); ++i) {
 				content += parser::snake_to_pascal(protocol.interfaces[i].name);
 				if (i == protocol.interfaces.size() - 1) {
@@ -118,9 +82,9 @@ int main() {
 				}
 				content += ", ";
 			}
-            if (i != protocols.size() - 1) {
-                content += ", ";
-            }
+			if (i != protocols.size() - 1) {
+				content += ", ";
+			}
 		}
 		content += ">;\n};";
 		write_file("interface.cppm", std::move(content));
@@ -143,12 +107,23 @@ int main() {
 					protocol.name, interface.name);
 
 				for (auto& required_interface : interface.required_interfaces) {
-					content += std::format("import :{}.{};\n", protocol.name, required_interface);
+					// Find which protocol supplies this interface, so we know which module to import from
+					std::string required_protocol = "";
+					for (auto& protocol : protocols) {
+						for (auto& interface : protocol.interfaces) {
+							if (interface.name == required_interface) {
+								required_protocol = protocol.name;
+							}
+						}
+					}
+					if (required_protocol == "")
+						throw std::runtime_error(std::format("Failed to find required protocol for required interface: {}", required_interface));
+					content += std::format("import :{}.{};\n", required_protocol, required_interface);
 				}
 
 				content += "export namespace mayquill {\n";
 				content += std::format("struct {} {{\n"
-                                       "    static constexpr std::string_view interface = \"{}\";\n"
+									   "    static constexpr std::string_view interface = \"{}\";\n"
 									   "    static constexpr std::uint32_t version = {};\n\n"
 									   "    Client& client;\n"
 									   "    Key keyd;\n"
@@ -227,10 +202,10 @@ int main() {
 				std::string content = "";
 				add_header(content);
 				content += "module;\n"
-                           "#include <mayquill/logger.h>\n"
+						   "#include <mayquill/logger.h>\n"
 						   // "#include <cassert>\n"
 						   "module mayquill;\n"
-                           "import :logger;\n"
+						   "import :logger;\n"
 						   "import :client;\n\n"
 						   "namespace mayquill {\n";
 
