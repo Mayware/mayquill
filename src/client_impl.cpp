@@ -20,10 +20,7 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 	}
 	Interface& object = std::get<1>(it->second);
 
-	std::visit([&](auto& interface) {
-		// Get the actual type
-		using T = std::decay_t<decltype(interface)>;
-
+	std::visit([&]<typename T>(T& interface) {
 		// Check if the nested request type exists
 		// If it does, we'll parse the args accordingly
 		// If it doesn't, then there shouldn't be any args

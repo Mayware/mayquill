@@ -349,10 +349,17 @@ class Client {
 			close(fd);
 		}
 	}
+    
+
+    template<typename T>
+    struct ObjectRef {
+        Key key;
+        T& object;
+    };
 
 	// Nullptr omits the userdata arg
 	template<typename T, typename D = std::nullptr_t>
-	std::pair<Key, T&> add_object(std::uint32_t id, std::unique_ptr<D> user_data = nullptr, std::source_location source = std::source_location::current()) {
+	ObjectRef<T> add_object(std::uint32_t id, std::unique_ptr<D> user_data = nullptr, std::source_location source = std::source_location::current()) {
 		static std::uint32_t unique_count = 0;
 		auto key = Key {.id = id, .unique = ++unique_count};
 		auto [it, inserted] = objects.emplace(
@@ -378,7 +385,7 @@ class Client {
 			MQ_SXERROR(source, "Tried to insert an object {} that was already added", key.id);
 		}
 		MQ_DEBUG("Added object id {}", id);
-		return {key, std::get<T>(std::get<1>(it->second))};
+		return ObjectRef { .key = key, .object = std::get<T>(std::get<1>(it->second)) };
 	}
 
 	template<typename T>
@@ -393,11 +400,22 @@ class Client {
 			MQ_SXERROR(source, "Key was found, but unique did not match: {}: {}", unique, key);
 	}
 
-	Key get_key(std::uint32_t id, std::source_location source = std::source_location::current()) {
+	// get_objet, but just from the id, no key, so it may *not* be what you expect
+	template<typename T>
+	ObjectRef<T> grab_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
 		auto it = objects.find(id);
 		if (it == objects.end())
 			MQ_SXERROR(source, "Id was not found in the array {}", id);
-		return Key {.id = id, .unique = std::get<0>(it->second)};
+		auto& object = std::get<1>(it->second);
+		if (!std::holds_alternative<T>(object)) {
+#ifdef MAYQUILL_ICE
+			static constexpr auto template_type = std::meta::identifier_of(^^T);
+			auto object_type = std::visit([]<typename O>(O&) { return std::meta::identifier_of(^^O); }, object);
+			MQ_SXERROR(source, "Tried to get the key for object {}, but object type was {}, expected {}",
+				id, object_type, template_type);
+#endif
+		}
+		return ObjectRef { .key = Key {.id = id, .unique = std::get<0>(it->second)}, .object = std::get<T>(std::get<1>(it->second)) };
 	}
 
 	void remove_object(Key key, std::source_location source = std::source_location::current()) {
@@ -428,10 +446,9 @@ class Client {
 		std::string message,
 		std::source_location source = std::source_location::current()) {
 
-		MQ_SERROR(source, "{}", message);
 		get_display().error(object_id, static_cast<std::uint32_t>(code), message);
-
 		disconnect_pending = true;
+		MQ_SXERROR(source, "{}", message);
 	}
 
 	std::uint32_t next_id() {
