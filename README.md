@@ -7,6 +7,8 @@ For a real example on how to use it, see [Mayday](https://github.com/Mayware/may
 ## Architecture
 handle_* functions are customisation points / hooks. For example, you may do Client::handle_destroy(), to run code before the real destruction of the client occurs. Equally, you may have WlSurface::handle(Request request), where request is an algebraic enum of all the possible request datas that you can switch on (and hence determine what actual request occured).
 
+That is the reason Mayquill is formed of partition modules, rather than of regular modules. You can define one implementation unit for mayquill, and override handle functions from *multiple paritions*, all from the that one mayquill implementation unit. Whereas, if regular modules were used, you would have to define a separate implementation unit for each mayquill.wl_whatever, and so could only largely override one handle at a time.
+
 The client has the following configuration points:\
 `handle_init()`\
 `handle_destroy()`

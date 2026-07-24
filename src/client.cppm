@@ -349,13 +349,6 @@ class Client {
 			close(fd);
 		}
 	}
-    
-
-    template<typename T>
-    struct ObjectRef {
-        Key key;
-        T& object;
-    };
 
 	// Nullptr omits the userdata arg
 	template<typename T, typename D = std::nullptr_t>
@@ -385,7 +378,7 @@ class Client {
 			MQ_SXERROR(source, "Tried to insert an object {} that was already added", key.id);
 		}
 		MQ_DEBUG("Added object id {}", id);
-		return ObjectRef { .key = key, .object = std::get<T>(std::get<1>(it->second)) };
+		return ObjectRef {.key = key, .object = std::get<T>(std::get<1>(it->second))};
 	}
 
 	template<typename T>
@@ -415,7 +408,7 @@ class Client {
 				id, object_type, template_type);
 #endif
 		}
-		return ObjectRef { .key = Key {.id = id, .unique = std::get<0>(it->second)}, .object = std::get<T>(std::get<1>(it->second)) };
+		return ObjectRef {.key = Key {.id = id, .unique = std::get<0>(it->second)}, .object = std::get<T>(std::get<1>(it->second))};
 	}
 
 	void remove_object(Key key, std::source_location source = std::source_location::current()) {
@@ -453,6 +446,16 @@ class Client {
 
 	std::uint32_t next_id() {
 		return current_server_id++;
+	}
+
+	std::uint32_t next_serial() {
+		static std::uint32_t current_serial = 0;
+		return current_serial++;
+	}
+
+	std::uint32_t elapsed_time() {
+		static auto start = std::chrono::steady_clock::now();
+		return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 	}
 
 #ifdef MAYQUILL_ICE

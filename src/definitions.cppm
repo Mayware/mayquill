@@ -5,6 +5,14 @@ namespace mayquill {
 export struct Key {
 	std::uint32_t id;
 	std::uint32_t unique;
+
+	bool operator==(const Key&) const = default;
+};
+
+export template<typename T>
+struct ObjectRef {
+	Key key;
+	T& object;
 };
 
 enum class WlType {
@@ -82,4 +90,3 @@ struct std::formatter<mayquill::Key> {
 		return std::format_to(ctx.out(), "Key{{{}[{}]}}", key.id, key.unique);
 	}
 };
-
