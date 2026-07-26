@@ -448,9 +448,11 @@ class Client {
 		return current_server_id++;
 	}
 
-	std::uint32_t next_serial() {
+	std::uint32_t next_serial(std::deque<std::uint32_t>& deque) {
 		static std::uint32_t current_serial = 0;
-		return current_serial++;
+        auto next_serial = current_serial++;
+        deque.push_back(next_serial);
+		return next_serial;
 	}
 
 	std::uint32_t elapsed_time() {

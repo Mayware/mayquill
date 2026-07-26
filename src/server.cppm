@@ -97,7 +97,7 @@ class Server {
 			if (client.disconnect_pending)
 				continue;
 
-			std::uint8_t buffer[128];
+			std::uint8_t buffer[1024];
 
 			while (true) {
 				// Useful link: https://stackoverflow.com/questions/32593697/understanding-the-msghdr-structure-from-sys-socket-h

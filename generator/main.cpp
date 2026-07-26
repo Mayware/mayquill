@@ -44,6 +44,7 @@ int main(int argc, char* argv[]) {
 		add_header(content);
 		content += "export module mayquill;\n"
 				   "export import :server;\n"
+                   "export import :client;\n"
 				   "export import :definitions;\n"
 				   "export import :logger;\n\n";
 
