@@ -26,7 +26,7 @@ struct Argument {
 
 struct Declaration {
 	std::string name;
-	std::string annotation;
+    bool is_destructor;
 	Description description;
 	std::vector<Argument> arguments;
 	std::uint32_t since;
@@ -209,10 +209,9 @@ std::int32_t get_entry_value(const pugi::xml_node& node) {
 }
 
 Declaration get_declaration(const pugi::xml_node& node, std::vector<std::string>& required_interfaces, bool is_request) {
-	auto is_destructor = get_destructor(node);
 	Declaration declaration = Declaration {
 		.name = is_request ? get_pascal_name(node) : get_name(node), // requests get pascal cased names, events get snake case
-		.annotation = is_destructor ? "[[=WlDeclaration::Destructor]]" : "[[=WlDeclaration::None]]",
+		.is_destructor = get_destructor(node),
 		.description = get_description(node.child("description")),
 		.since = get_since(node),
 	};

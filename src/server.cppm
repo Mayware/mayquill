@@ -18,6 +18,9 @@ class Server {
 
   public:
 	int fd;
+    // Just an arbitrary reference, you can set to anything. Since Objects have a reference to the client, and the client
+    // to the server, you can give shared access to anything via this
+    void* reference;
 
 	void bind_socket() {
 		std::string directory;

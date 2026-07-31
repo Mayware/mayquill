@@ -2,7 +2,6 @@ module;
 #include "mayquill/logger.h"
 #include <cassert>
 #include <cerrno>
-#include <exception>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -20,8 +19,10 @@ class Server;
 class Client {
 	friend class Server;
 
-  private:
+  public:
 	Server& server;
+
+  private:
 	// Index is the objectid, the 1st value is a unique id. 0th index is wasted
 	std::unordered_map<std::uint32_t, std::tuple<std::uint32_t, Interface>> objects;
 
@@ -350,7 +351,8 @@ class Client {
 		}
 	}
 
-	// Nullptr omits the userdata arg
+	// Nullptr omits the userdata arg. It's nullptr_t rather than void, because std::unique_ptr<void> isn't valid, and we don't pass in a custom deleter, the custom deleter
+	// is only set when we rob the value inside, and then give it a custom deleter
 	template<typename T, typename D = std::nullptr_t>
 	ObjectRef<T> add_object(std::uint32_t id, std::unique_ptr<D> user_data = nullptr, std::source_location source = std::source_location::current()) {
 		static std::uint32_t unique_count = 0;
@@ -450,14 +452,9 @@ class Client {
 
 	std::uint32_t next_serial(std::deque<std::uint32_t>& deque) {
 		static std::uint32_t current_serial = 0;
-        auto next_serial = current_serial++;
-        deque.push_back(next_serial);
+		auto next_serial = current_serial++;
+		deque.push_back(next_serial);
 		return next_serial;
-	}
-
-	std::uint32_t elapsed_time() {
-		static auto start = std::chrono::steady_clock::now();
-		return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 	}
 
 #ifdef MAYQUILL_ICE

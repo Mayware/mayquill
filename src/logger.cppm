@@ -50,6 +50,8 @@ void log_impl(std::source_location source, std::format_string<Args...> format, A
 	if constexpr (ShouldErrno) {
 		final_message = std::format("{}: {}", final_message, std::strerror(errno));
 	}
+	std::ofstream file("log.txt", std::ios::app);
+	file << final_message << "\n";
 	if constexpr (ShouldKill) {
 		throw std::runtime_error(final_message);
 	}

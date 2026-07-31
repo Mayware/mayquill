@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
 		add_header(content);
 		content += "export module mayquill;\n"
 				   "export import :server;\n"
-                   "export import :client;\n"
+				   "export import :client;\n"
 				   "export import :definitions;\n"
 				   "export import :logger;\n\n";
 
@@ -144,7 +144,8 @@ int main(int argc, char* argv[]) {
 				// Write the request structs
 				for (auto& request : interface.requests) {
 					content += "   struct";
-					content += discriminate_clang(std::format("   {}", request.annotation));
+					// Add the destructor annotation, if it is one
+					content += discriminate_clang(std::format("   {}", request.is_destructor ? "[[=WlDeclaration::Destructor]]" : "[[=WlDeclaration::None]]"));
 					content += std::format("    {} {{", request.name);
 
 					for (auto& arg : request.arguments) {
@@ -231,6 +232,9 @@ int main(int argc, char* argv[]) {
 					}
 					definition += ");";
 					content += discriminate_clang(definition);
+					if (event.is_destructor) {
+						content += "    destroy();\n";
+					}
 					content += "}\n\n";
 				}
 

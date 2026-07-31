@@ -10,6 +10,7 @@
 #define MQ_XERROR(...) do { if constexpr (mayquill::log::level >= mayquill::log::LogLevel::Error) mayquill::xerror(mayquill::log::here(), __VA_ARGS__); __builtin_unreachable(); } while (0)
 #define MQ_XERRNO(...) do { if constexpr (mayquill::log::level >= mayquill::log::LogLevel::Error) mayquill::xerrorno(mayquill::log::here(), __VA_ARGS__); __builtin_unreachable(); } while (0)
 #define MQ_SXERROR(source, ...) do { if constexpr (mayquill::log::level >= mayquill::log::LogLevel::Error) mayquill::xerror(source, __VA_ARGS__); __builtin_unreachable(); } while (0)
+#define MQ_SXERRNO(source, ...) do { if constexpr (mayquill::log::level >= mayquill::log::LogLevel::Error) mayquill::xerrorno(source, __VA_ARGS__); __builtin_unreachable(); } while (0)
 // S prefix:
 //          S means Source. It takes the source information, rather than taking the source at that line
 // X prefix:

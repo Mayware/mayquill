@@ -1,5 +1,5 @@
 module;
-#include "mayquill/logger.h"
+#include <mayquill/logger.h>
 module mayquill;
 import std;
 import :client;
