@@ -13,14 +13,13 @@ import :definitions;
 
 export namespace mayquill {
 class Server {
-  private:
-	std::vector<std::unique_ptr<Client>> clients;
-
   public:
 	int fd;
-    // Just an arbitrary reference, you can set to anything. Since Objects have a reference to the client, and the client
-    // to the server, you can give shared access to anything via this
-    void* reference;
+	// Just an arbitrary reference, you can set to anything. Since Objects have a reference to the client, and the client
+	// to the server, you can give shared access to anything via this
+	void* reference;
+
+	std::vector<std::unique_ptr<Client>> clients;
 
 	void bind_socket() {
 		std::string directory;
@@ -39,7 +38,7 @@ class Server {
 		}
 
 		// Allocate the socket, set it to be non blocking
-		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 		if (fd < 0) {
 			MQ_XERRNO("Failed to open socket at {}", directory);
 		}
@@ -62,17 +61,18 @@ class Server {
 		MQ_DEBUG("Bound socket");
 	}
 
-	void try_accept_clients() {
+	std::vector<int> try_accept_clients() {
 		// Loop until we've accepted all clients
+        std::vector<int> accepted;
 		while (true) {
-			int fd = accept4(this->fd, nullptr, nullptr, SOCK_NONBLOCK);
+			int fd = accept4(this->fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
 			if (fd == -1) {
 				if (!(errno == EWOULDBLOCK)) {
 					MQ_ERRNO("Failed to accept client");
 				}
 
 				// Nothing to accept, exit the loop
-				return;
+				return {};
 			}
 
 			// New client accepted
@@ -82,8 +82,10 @@ class Server {
 			Client* client_ptr = client.get();
 			this->clients.push_back(std::move(client));
 			client_ptr->handle_init();
+            accepted.push_back(fd);
 			MQ_DEBUG("Accepted a new client");
 		}
+        return accepted;
 	}
 
 	/* Message form:
@@ -118,7 +120,7 @@ class Server {
 					.msg_control = control_buffer,
 					.msg_controllen = sizeof(control_buffer),
 				};
-				int bytes_read = recvmsg(client.fd, &message_header, 0);
+				int bytes_read = recvmsg(client.fd, &message_header, MSG_CMSG_CLOEXEC);
 
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
@@ -156,10 +158,10 @@ class Server {
 					}
 				}
 
-                // Notice how we just read the FDs up above, but, only now we check if the ancillary data fit and wasn't truncated
-                // The above logic should work for fds that were receieved still (it just hits nullptr earlier), so that still gets added
-                // to the request_fds. If it didn't fit, we now error, so that will cleaned up any fds that did fit in the truncated buffer
-                // that we are obligated to close (so we dont leak)
+				// Notice how we just read the FDs up above, but, only now we check if the ancillary data fit and wasn't truncated
+				// The above logic should work for fds that were receieved still (it just hits nullptr earlier), so that still gets added
+				// to the request_fds. If it didn't fit, we now error, so that will cleaned up any fds that did fit in the truncated buffer
+				// that we are obligated to close (so we dont leak)
 				if (message_header.msg_flags & MSG_CTRUNC) {
 					client.error(1, WlDisplay::ErrorEnum::Implementation, "Control message was truncated, couldn't fit into buffer");
 					break;

@@ -5,6 +5,7 @@ module;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <fcntl.h>
 export module mayquill:client;
 import std;
 import :definitions;
@@ -22,10 +23,9 @@ class Client {
   public:
 	Server& server;
 
-  private:
-	// Index is the objectid, the 1st value is a unique id. 0th index is wasted
+	// Index is the objectid, Value is a tuple of <Unique ID (just an increasing counter), Object variant>. We don't use the 0th index
 	std::unordered_map<std::uint32_t, std::tuple<std::uint32_t, Interface>> objects;
-
+  private:
 	// Part of outgoing messages (events)
 	std::vector<std::uint8_t> event_data;
 	std::vector<int> event_fds;
@@ -117,8 +117,8 @@ class Client {
 		} else if constexpr (Wl == WlType::Fd) {
 			// Duplicate the fd, to get a second handle
 			// We do this, so if the caller closes their fd, we still have a valid fd to the file
-			// I've seen people recommend close on exec, but we never exec, so i don't see a point
-			auto dupe = dup(value);
+            // 3rd arg: https://www.man7.org/linux/man-pages/man2/F_DUPFD_CLOEXEC.2const.html
+			auto dupe = fcntl(value, F_DUPFD_CLOEXEC, 0);
 			if (dupe == -1)
 				throw std::runtime_error("Failed to dupe fd");
 			fds.push_back(dupe);
