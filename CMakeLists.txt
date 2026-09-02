@@ -15,6 +15,10 @@ endif()
 project(mayquill)
 add_library(mayquill STATIC)
 
+#> Maylog
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../maylog ${CMAKE_CURRENT_BINARY_DIR}/maylog)
+target_link_libraries(mayquill PRIVATE maylog)
+
 file(GLOB_RECURSE GEN_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/build/generated-modules/*.cppm")
 file(GLOB_RECURSE GEN_IMPL_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/build/generated-modules/*_impl.cpp")
 file (GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cppm")
@@ -25,8 +29,4 @@ target_sources(mayquill
     PUBLIC FILE_SET CXX_MODULES FILES
         ${SRC_FILES}
         ${GEN_FILES}
-    PUBLIC FILE_SET HEADERS
-        BASE_DIRS src FILES
-            src/mayquill/logger.h
-
 )

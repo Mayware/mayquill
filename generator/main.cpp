@@ -45,8 +45,7 @@ int main(int argc, char* argv[]) {
 		content += "export module mayquill;\n"
 				   "export import :server;\n"
 				   "export import :client;\n"
-				   "export import :definitions;\n"
-				   "export import :logger;\n\n";
+				   "export import :definitions;\n\n";
 
 		for (auto& protocol : protocols) {
 			for (auto& interface : protocol.interfaces) {
@@ -203,12 +202,9 @@ int main(int argc, char* argv[]) {
 			{
 				std::string content = "";
 				add_header(content);
-				content += "module;\n"
-						   "#include <mayquill/logger.h>\n"
-						   // "#include <cassert>\n"
-						   "module mayquill;\n"
-						   "import :logger;\n"
-						   "import :client;\n\n"
+				content += "module mayquill;\n"
+						   "import logger;\n"
+						   "import :client;\n"
 						   "namespace mayquill {\n";
 
 				// Write event implementations
@@ -240,7 +236,6 @@ int main(int argc, char* argv[]) {
 
 				content += std::format("void {}::destroy() {{\n"
 									   "   handle_destroy();\n"
-									   // "   assert(user_data == nullptr && \"{} did not clean up user data before destruction - was not nullptr\");\n"
 									   "   client.remove_object(keyd);\n"
 									   "}}\n\n",
 					struct_name, struct_name);
@@ -251,7 +246,7 @@ int main(int argc, char* argv[]) {
 						"// Default implementation, linker will prefer the implementation you provide, since we've marked this one as weak (absolutely ratioed)\n"
 						"[[gnu::weak]]\n"
 						"void {}::handle(Request request) {{\n"
-						"    MQ_WARN(\"{}::handle(Request request) is currently unimplemented, request will be ignored\");\n"
+						"    log<Wn>([]{{ return \"{}::handle(Request request) is currently unimplemented, request will be ignored\"; }});\n"
 						"}}\n",
 						struct_name, struct_name, struct_name);
 				}

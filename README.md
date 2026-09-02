@@ -43,6 +43,10 @@ The opcode is matched to the request struct. This struct type is then passed int
 
 Now `try_flush_events()`. Whenever you call an event on a wayland object (just ordinary functions), it serialises the parameters you give it into a bytestream (matches wayland attributes, because of annotations). The function, eg. `wl_touch.frame()` calls `client.process_event()`, giving it the parameters and opcode. The client will then, using `serialise_field()`, serialise that programmatically into `event_data` and `event_fds`, which are just `vec<uint8>`. Message boundaries are not explicitly preserved, becuase the clients reform that like we do when we receive requests. When `try_flush_events()` is called, we then try send all the pre-existing `event_data` and `event_fds` to the client, using `flush_events()`.
 
+## Todos
+Add client side generation / support client POV
+For constuctor request / events (which can be inferred with the new_id parameter type), allow for immediate object creation (which can then use the provided type), rather than having to do a manual add_object after constructors.
+
 ##  Licensing
 The project's source code is licensed under `LGPL-3.0-or-later`.
 
