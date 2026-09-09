@@ -9,7 +9,7 @@ export module mayquill:client_forward;
  *  The client then also imports the interface, and hence the wayland objects, causing a cycle. The objects
  *  require the client, and the client requires the objects (indirectly through interface). That was the issue
  *  with the previous architecture.
- *  
+ *
  *  With the new architecture, we forward declare the client struct, which the wayland objects can use. This
  *  allows us to do Client*. Obviously, we can't access fields of it, since it's just struct Client*, so we
  *  must remove the implementations of the functions (eg. ones that use deserialise, and hence require the
@@ -19,5 +19,5 @@ export module mayquill:client_forward;
  */
 
 export namespace mayquill {
-    struct Client;
+struct Client;
 }

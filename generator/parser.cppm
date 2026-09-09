@@ -26,7 +26,7 @@ struct Argument {
 
 struct Declaration {
 	std::string name;
-    bool is_destructor;
+	bool is_destructor;
 	Description description;
 	std::vector<Argument> arguments;
 	std::uint32_t since;
@@ -187,13 +187,13 @@ bool get_bitfield(const pugi::xml_node& node) {
 }
 
 std::string get_name(const pugi::xml_node& node) {
-    std::string name = node.attribute("name").as_string();
+	std::string name = node.attribute("name").as_string();
 	// Spec is retarded and sometimes uses numbers as the name, so we need to prefix it to make it valid
 	// Other keywords are also used, so do the same
 	if (std::isdigit(name.front()) || name == "namespace") {
 		name.insert(name.begin(), '_'); // Prefix it with _ if so
 	}
-    return name;
+	return name;
 }
 
 std::string get_pascal_name(const pugi::xml_node& node) {
@@ -287,7 +287,7 @@ Enum get_enum(const pugi::xml_node& node) {
 std::vector<Protocol> get_protocols(char* spec_path) {
 	std::vector<Protocol> protocols;
 
-    std::println("Target path: {}", spec_path);
+	std::println("Target path: {}", spec_path);
 	for (const auto& entry : std::filesystem::directory_iterator(spec_path)) {
 		pugi::xml_document doc;
 		pugi::xml_parse_result result = doc.load_file(entry.path().c_str());

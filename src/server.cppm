@@ -39,7 +39,7 @@ class Server {
 		// Allocate the socket, set it to be non blocking
 		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 		if (fd < 0) {
-			log<Er, static_cast<MaylogFlag>(Ex | No)>([&] { return std::format("Failed to open socket at {}", directory); });
+			log<Er, Ex | No>([&] { return std::format("Failed to open socket at {}", directory); });
 		}
 
 		// Bind the socket to the address
@@ -48,12 +48,12 @@ class Server {
 
 		// Reason to cast: https://stackoverflow.com/a/57431271
 		if (bind(fd, (sockaddr*)&address, sizeof(address)) < 0) {
-			log<Er, static_cast<MaylogFlag>(Ex | No)>([&] { return std::format("Failed to bind to socket at {}", directory); });
+			log<Er, Ex | No>([&] { return std::format("Failed to bind to socket at {}", directory); });
 		}
 
 		// SOMAXCONN is just as many as the kernel can handle
 		if (listen(fd, SOMAXCONN) < 0) {
-			log<Er, static_cast<MaylogFlag>(Ex | No)>([&] { return std::format("Failed to listen to socket at {}", directory); });
+			log<Er, Ex | No>([&] { return std::format("Failed to listen to socket at {}", directory); });
 		}
 
 		this->fd = fd;
