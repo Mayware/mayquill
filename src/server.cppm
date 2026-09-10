@@ -6,7 +6,7 @@ module;
 #include <unistd.h>
 export module mayquill:server;
 export import :client;
-import logger;
+import :logger;
 import :wayland.wl_display;
 import :definitions;
 

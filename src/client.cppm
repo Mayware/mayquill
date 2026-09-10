@@ -7,7 +7,7 @@ module;
 #include <unistd.h>
 export module mayquill:client;
 import std;
-import logger;
+import :logger;
 import :definitions;
 import :interface;
 

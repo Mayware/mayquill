@@ -203,7 +203,7 @@ int main(int argc, char* argv[]) {
 				std::string content = "";
 				add_header(content);
 				content += "module mayquill;\n"
-						   "import logger;\n"
+						   "import :logger;\n"
 						   "import :client;\n"
 						   "namespace mayquill {\n";
 

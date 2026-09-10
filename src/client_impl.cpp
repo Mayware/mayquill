@@ -1,6 +1,6 @@
 module mayquill;
 import std;
-import logger;
+import :logger;
 import :client;
 import :definitions;
 

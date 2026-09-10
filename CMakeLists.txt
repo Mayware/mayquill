@@ -7,17 +7,12 @@ set(CMAKE_CXX_MODULE_STD ON)
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-#> Debug by default
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Debug)
-endif()
-
 project(mayquill)
 add_library(mayquill STATIC)
 
 #> Maylog
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../maylog ${CMAKE_CURRENT_BINARY_DIR}/maylog)
-target_link_libraries(mayquill PRIVATE maylog)
+target_link_libraries(mayquill PUBLIC maylog)
 
 file(GLOB_RECURSE GEN_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/build/generated-modules/*.cppm")
 file(GLOB_RECURSE GEN_IMPL_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/build/generated-modules/*_impl.cpp")

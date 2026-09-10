@@ -1,10 +1,9 @@
-export module logger;
-export import maylog;
+module mayquill:logger;
+import maylog;
 
-using namespace maylog::config;
-export using namespace maylog;
+using namespace maylog;
 
-export constexpr LevelInfo Db = LevelInfo("myq debug", true, CatppuccinFrappe::teal());
-export constexpr LevelInfo If = LevelInfo("myq info", true, CatppuccinFrappe::flamingo(), 100);
-export constexpr LevelInfo Wn = LevelInfo("myq warn", true, CatppuccinFrappe::yellow(), 200);
-export constexpr LevelInfo Er = LevelInfo("myq error", true, CatppuccinFrappe::red(), 300, true);
+constexpr maylog::config::LevelInfo Db = maylog::config::LevelInfo("myq debug", true, maylog::config::CatppuccinFrappe::teal());
+constexpr maylog::config::LevelInfo If = maylog::config::LevelInfo("myq info", true, maylog::config::CatppuccinFrappe::flamingo(), 100);
+constexpr maylog::config::LevelInfo Wn = maylog::config::LevelInfo("myq warn", true, maylog::config::CatppuccinFrappe::yellow(), 200);
+constexpr maylog::config::LevelInfo Er = maylog::config::LevelInfo("myq error", true, maylog::config::CatppuccinFrappe::red(), 300, true);
