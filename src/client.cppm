@@ -180,7 +180,7 @@ class Client {
 			if constexpr (Wl == WlType::NewId) {
 				if (this->objects.contains(value) || value == 0 || FIRST_SERVER_ID <= value) {
 					// Technically they should be densly packed, but it doesn't affect us, and checking would be relatively expensive
-					log<Er, Ex>([] { return "Invalid new_id provided, it was either in range of the server ids, or already used"; });
+					mq::fail<mq::Er>([] { return "Invalid new_id provided, it was either in range of the server ids, or already used"; });
 				}
 			} else if constexpr (Wl == WlType::NullableObject) {
 				if (value == 0) {
@@ -198,7 +198,7 @@ class Client {
 			return value;
 		} else if constexpr (Wl == WlType::Fd) {
 			if (this->request_fds.empty())
-				log<Er, Ex>([] { return "Expected an fd, but the vector was empty"; });
+				mq::fail<mq::Er>([] { return "Expected an fd, but the vector was empty"; });
 			T value;
 			std::memcpy(&value, &request_fds.front(), sizeof(T));
 			this->request_fds.erase(this->request_fds.begin());
@@ -220,13 +220,13 @@ class Client {
 				} else {
 					// However, non-nullable strings cannot have a count of 0, since they must always
 					// have a trailing \0, to represent an empty string instead.
-					log<Er, Ex>([] { return "The string wasn't nullable, yet it had a count of 0"; });
+					mq::fail<mq::Er>([] { return "The string wasn't nullable, yet it had a count of 0"; });
 				}
 			}
 			bytes = advance(message, count); // Consume the null terminator too
 			// Ensure the last thing was actually a null term, so we can directly cnstruct a string
 			if (bytes.back() != '\0')
-				log<Er, Ex>([] { return "String wasn't null terminated, quite cheeky, wonder what you were trying to pull off here"; });
+				mq::fail<mq::Er>([] { return "String wasn't null terminated, quite cheeky, wonder what you were trying to pull off here"; });
 			std::string value(bytes.begin(), bytes.end() - 1); // Ignore the null terminator
 			// Round the count up to the nearest 4, then consume JUST the padding it took, since we already consumed count
 			advance(message, ((count + 3) & ~3u) - count);
@@ -269,7 +269,7 @@ class Client {
 
 	std::span<const std::uint8_t> advance(std::span<const std::uint8_t>& message, std::size_t n) {
 		if (message.size() < n) {
-			log<Er, Ex>([] { return "Message length was invalid to deserialise field"; });
+			mq::fail<mq::Er>([] { return "Message length was invalid to deserialise field"; });
 		}
 		auto left_behind = message.first(n); // Gets a subview of the first n bytes
 		message = message.subspan(n);		 // Gets a subview of anything after n
@@ -378,9 +378,9 @@ class Client {
 				}}));
 
 		if (!inserted) {
-			log<Er, Ex>([&] { return std::format("Tried to insert an object {} that was already added", key.id); }, source);
+			mq::fail<mq::Er>([&] { return std::format("Tried to insert an object {} that was already added", key.id); }, source);
 		}
-		log<Db>([&] { return std::format("Added object id {}", id); });
+		mq::log<mq::Db>([&] { return std::format("Added object id {}", id); });
 		return ObjectRef {.key = key, .object = std::get<T>(std::get<1>(it->second))};
 	}
 
@@ -388,12 +388,12 @@ class Client {
 	T& get_object(Key key, std::source_location source = std::source_location::current()) {
 		auto it = objects.find(key.id);
 		if (it == objects.end())
-			log<Er, Ex>([&] { return std::format("Key was not found in the array {}", key); }, source);
+			mq::fail<mq::Er>([&] { return std::format("Key was not found in the array {}", key); }, source);
 		auto& [unique, object] = it->second;
 		if (unique == key.unique)
 			return std::get<T>(object);
 		else
-			log<Er, Ex>([&] { return std::format("Key was found, but unique did not match: {}: {}", unique, key); }, source);
+			mq::fail<mq::Er>([&] { return std::format("Key was found, but unique did not match: {}: {}", unique, key); }, source);
 	}
 
 	// get_objet, but just from the id, no key, so it may *not* be what you expect
@@ -401,26 +401,26 @@ class Client {
 	ObjectRef<T> grab_object(std::uint32_t id, std::source_location source = std::source_location::current()) {
 		auto it = objects.find(id);
 		if (it == objects.end())
-			log<Er, Ex>([&] { return std::format("Id was not found in the array {}", id); }, source);
+			mq::fail<mq::Er>([&] { return std::format("Id was not found in the array {}", id); }, source);
 		auto& object = std::get<1>(it->second);
 		if (!std::holds_alternative<T>(object)) {
 #ifdef MAYQUILL_ICE
 			static constexpr auto template_type = std::meta::identifier_of(^^T);
 			auto object_type = std::visit([]<typename O>(O&) { return std::meta::identifier_of(^^O); }, object);
-			log<Er, Ex>([&] { return std::format("Tried to get the key for object {}, but object type was {}, expected {}", id, object_type, template_type); }, source);
+			mq::fail<mq::Er>([&] { return std::format("Tried to get the key for object {}, but object type was {}, expected {}", id, object_type, template_type); }, source);
 #endif
 		}
 		return ObjectRef {.key = Key {.id = id, .unique = std::get<0>(it->second)}, .object = std::get<T>(std::get<1>(it->second))};
 	}
 
 	void remove_object(Key key, std::source_location source = std::source_location::current()) {
-		log<Db>([&] { return std::format("Removed object id {}", key.id); });
+		mq::log<mq::Db>([&] { return std::format("Removed object id {}", key.id); });
 #ifndef NDEBUG
 		auto pair = objects.extract(key.id);
 		if (pair.empty())
-			log<Er, Ex>([] { return "Tried to remove an object, which did not exist!"; }, source);
+			mq::fail<mq::Er>([] { return "Tried to remove an object, which did not exist!"; }, source);
 		if (std::get<0>(pair.mapped()) != key.unique)
-			log<Er, Ex>([&] { return std::format("Tried to remove an object, but the key's unique value was not the same! {}", key.id); }, source);
+			mq::fail<mq::Er>([&] { return std::format("Tried to remove an object, but the key's unique value was not the same! {}", key.id); }, source);
 #endif
 		objects.erase(key.id);
 
@@ -428,7 +428,7 @@ class Client {
 		// Obviously if we removed the display, don't emit that event because we can't
 		if (key.id < FIRST_SERVER_ID && key.id != 1) {
 			get_display().delete_id(key.id);
-			log<Db>([&] { return std::format("Told client it can reuse id {}", key.id); });
+			mq::log<mq::Db>([&] { return std::format("Told client it can reuse id {}", key.id); });
 		}
 	}
 
@@ -442,7 +442,7 @@ class Client {
 
 		get_display().error(object_id, static_cast<std::uint32_t>(code), message);
 		disconnect_pending = true;
-		log<Er, Ex>([&] { return std::format("{}", message); }, source);
+		mq::fail<mq::Er>([&] { return std::format("{}", message); }, source);
 	}
 
 	std::uint32_t next_id() {
@@ -461,7 +461,7 @@ class Client {
 	void process_event(std::uint32_t object_id, const Args&... args) {
 		static constexpr auto parameters = std::define_static_array(std::meta::parameters_of(Fn));
 		static constexpr auto wl_types = get_wl_types(parameters);
-		log<Db>([&] { return std::format("Event {}", log_wl_function<Fn, Opcode>(object_id, args...)); });
+		mq::log<mq::Db>([&] { return std::format("Event {}", log_wl_function<Fn, Opcode>(object_id, args...)); });
 
 		auto offset = event_data.size();
 		event_data.resize(offset + sizeof(Header)); // Add reserved space for the header

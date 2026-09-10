@@ -39,7 +39,7 @@ class Server {
 		// Allocate the socket, set it to be non blocking
 		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 		if (fd < 0) {
-			log<Er, Ex | No>([&] { return std::format("Failed to open socket at {}", directory); });
+			mq::fail<mq::Er, mq::No>([&] { return std::format("Failed to open socket at {}", directory); });
 		}
 
 		// Bind the socket to the address
@@ -48,16 +48,16 @@ class Server {
 
 		// Reason to cast: https://stackoverflow.com/a/57431271
 		if (bind(fd, (sockaddr*)&address, sizeof(address)) < 0) {
-			log<Er, Ex | No>([&] { return std::format("Failed to bind to socket at {}", directory); });
+			mq::fail<mq::Er, mq::No>([&] { return std::format("Failed to bind to socket at {}", directory); });
 		}
 
 		// SOMAXCONN is just as many as the kernel can handle
 		if (listen(fd, SOMAXCONN) < 0) {
-			log<Er, Ex | No>([&] { return std::format("Failed to listen to socket at {}", directory); });
+			mq::fail<mq::Er, mq::No>([&] { return std::format("Failed to listen to socket at {}", directory); });
 		}
 
 		this->fd = fd;
-		log<Db>([] { return "Bound socket"; });
+		mq::log<mq::Db>([] { return "Bound socket"; });
 	}
 
 	std::vector<int> try_accept_clients() {
@@ -67,7 +67,7 @@ class Server {
 			int fd = accept4(this->fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
 			if (fd == -1) {
 				if (!(errno == EWOULDBLOCK)) {
-					log<Er, No>([] { return "Failed to accept client"; });
+					mq::log<mq::Er, mq::No>([] { return "Failed to accept client"; });
 				}
 
 				// Nothing to accept, exit the loop
@@ -82,7 +82,7 @@ class Server {
 			this->clients.push_back(std::move(client));
 			client_ptr->handle_init();
 			accepted.push_back(fd);
-			log<Db>([] { return "Accepted a new client"; });
+			mq::log<mq::Db>([] { return "Accepted a new client"; });
 		}
 		return accepted;
 	}
@@ -123,20 +123,20 @@ class Server {
 
 				if (bytes_read == 0) {
 					// Client disconnected, cleanup
-					log<Db>([] { return "Client disconnected"; });
+					mq::log<mq::Db>([] { return "Client disconnected"; });
 					clients_to_destroy.push_back(&client);
 					break;
 				} else if (bytes_read == -1) {
 					if (errno == EWOULDBLOCK) {
 						break;
 					} else {
-						log<Er, No>([&] { return std::format("Failed to read from fd {}", client.fd); });
+						mq::log<mq::Er, mq::No>([&] { return std::format("Failed to read from fd {}", client.fd); });
 						clients_to_destroy.push_back(&client);
 						break;
 					}
 				}
 
-				log<Db>([&] { return std::format("Read {} bytes", bytes_read); });
+				mq::log<mq::Db>([&] { return std::format("Read {} bytes", bytes_read); });
 				client.request_data.insert(client.request_data.end(), buffer, buffer + bytes_read);
 
 				// PBUG: I have avoided macros in this, because I didn't understand how there could be alignment between the
@@ -153,7 +153,7 @@ class Server {
 						// CMSG_DATA just gives the first byte of the payload, which should be a packed int array of the fd ids
 						int* received_fds = reinterpret_cast<int*>(cmsg + 1); // Skip the header, pointer arithemtic will actually do cmsg + sizeof(cmsghdr) in human logic
 						client.request_fds.insert(client.request_fds.end(), received_fds, received_fds + number_fds);
-						log<Db>([&] { return std::format("Received {} fds", number_fds); });
+						mq::log<mq::Db>([&] { return std::format("Received {} fds", number_fds); });
 					}
 				}
 
@@ -239,7 +239,7 @@ class Server {
 				return;
 			}
 		}
-		log<Er, Ex>([] { return "Tried to destroy a nonexistent client"; });
+		mq::fail<mq::Er>([] { return "Tried to destroy a nonexistent client"; });
 	}
 };
 } // namespace mayquill

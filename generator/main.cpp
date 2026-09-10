@@ -246,7 +246,7 @@ int main(int argc, char* argv[]) {
 						"// Default implementation, linker will prefer the implementation you provide, since we've marked this one as weak (absolutely ratioed)\n"
 						"[[gnu::weak]]\n"
 						"void {}::handle(Request request) {{\n"
-						"    log<Wn>([]{{ return \"{}::handle(Request request) is currently unimplemented, request will be ignored\"; }});\n"
+						"    mq::log<mq::Wn>([]{{ return \"{}::handle(Request request) is currently unimplemented, request will be ignored\"; }});\n"
 						"}}\n",
 						struct_name, struct_name, struct_name);
 				}

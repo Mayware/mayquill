@@ -42,7 +42,7 @@ void Client::process_request(std::vector<std::uint8_t> message) {
 						this->error(header.object_id, WlDisplay::ErrorEnum::InvalidMethod, e.what());
 						return;
 					}
-					log<Db>([&] { return std::format("Request {}", log_wl_struct(alternative, header.object_id, header.opcode)); });
+					mq::log<mq::Db>([&] { return std::format("Request {}", log_wl_struct(alternative, header.object_id, header.opcode)); });
 					interface.handle(alternative);
 					static constexpr auto wl_declaration = std::meta::extract<WlDeclaration>(
 						// Ask for the reflections on the original type, not on the alias
